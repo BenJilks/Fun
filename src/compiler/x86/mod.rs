@@ -167,7 +167,8 @@ impl<Output> X86CodeGenorator<Output>
             X86StorageLocation::Register(_) => Ok(value),
             X86StorageLocation::Deref(_, _) => Ok(value),
             X86StorageLocation::Local(_, _) => self.move_to_register(value),
-            X86StorageLocation::Stack(_, _) => self.move_to_register(value),
+            X86StorageLocation::StackValue(_, _) => self.move_to_register(value),
+            X86StorageLocation::StackReference(_, _, _) => self.move_to_register(value),
             X86StorageLocation::Constant(_) => Ok(value),
             X86StorageLocation::I32(_) => Ok(value),
             X86StorageLocation::I8(_) => Ok(value),
@@ -187,7 +188,8 @@ impl<Output> X86CodeGenorator<Output>
             X86StorageLocation::Register(_) => Ok(value),
             X86StorageLocation::Deref(_, _) => Ok(value),
             X86StorageLocation::Local(_, _) => self.move_to_register(value),
-            X86StorageLocation::Stack(_, _) => self.move_to_register(value),
+            X86StorageLocation::StackValue(_, _) => self.move_to_register(value),
+            X86StorageLocation::StackReference(_, _, _) => self.move_to_register(value),
             X86StorageLocation::Constant(_) => self.move_to_register(value),
             X86StorageLocation::I32(_) => self.move_to_register(value),
             X86StorageLocation::I8(_) => self.move_to_register(value),
@@ -258,12 +260,22 @@ impl<Output> X86CodeGenorator<Output>
                             X86Register::ebp(), *from_offset)?;
                     },
 
-                    X86StorageLocation::Stack(_, from_size) =>
+                    X86StorageLocation::StackValue(position, from_size) =>
                     {
+                        assert!(self.register_allocator.borrow().is_stack_postion_top(*position));
                         assert_eq!(size, *from_size);
                         self.mem_copy(size,
                             X86Register::ebp(), to_offset,
                             X86Register::esp(), 0)?;
+                    },
+
+                    X86StorageLocation::StackReference(position, offset, from_size) =>
+                    {
+                        assert!(self.register_allocator.borrow().is_stack_postion_top(*position));
+                        assert_eq!(size, *from_size);
+                        self.mem_copy(size,
+                            X86Register::ebp(), to_offset,
+                            X86Register::esp(), *offset as i32)?;
                     },
 
                     // TODO: Implement this
@@ -298,26 +310,34 @@ impl<Output> X86CodeGenorator<Output>
                         X86Register::ebp(), *offset)?;
                 },
 
-                // NOTE: Do nothing, as this is already on the stack
-                X86StorageLocation::Stack(_, _) =>
+                X86StorageLocation::StackValue(_, _) =>
                 {
+                    // NOTE: Do nothing, as this is already on the stack
                     self.label("Already on stack")?;
+                },
+
+                X86StorageLocation::StackReference(_, _, _) =>
+                {
+                    // FIXME: What do we do here?
+                    panic!();
                 },
 
                 X86StorageLocation::StructData(data) =>
                 {
                     let size = data.iter().map(|(_, _, x)| x).sum();
-                    let stack_top = self.new_value(X86StorageLocation::Stack(0, size));
-                    self.mov_into_struct(stack_top.clone(), value)?;
-                    std::mem::forget(stack_top);
+                    self.emit_line(format!("sub esp, {}", size))?;
+
+                    let stack_top = self.new_value(X86StorageLocation::StackReference(0, 0, size));
+                    self.mov_into_struct(stack_top, value)?;
                 },
 
                 X86StorageLocation::ArrayData(values, item_size) =>
                 {
                     let size = item_size * values.len();
-                    let stack_top = self.new_value(X86StorageLocation::Stack(0, size));
-                    self.mov_into_array(stack_top.clone(), value)?;
-                    std::mem::forget(stack_top);
+                    self.emit_line(format!("sub esp, {}", size))?;
+
+                    let stack_top = self.new_value(X86StorageLocation::StackReference(0, 0, size));
+                    self.mov_into_array(stack_top, value)?;
                 },
 
                 // TODO: Implement this
@@ -366,7 +386,7 @@ impl<Output> X86CodeGenorator<Output>
         }
 
         let position = self.register_allocator.borrow_mut().pushed_value_on_stack(size);
-        Ok(self.new_value(X86StorageLocation::Stack(position, size)))
+        Ok(self.new_value(X86StorageLocation::StackValue(position, size)))
     }
 
     fn apply_deref(&mut self, value: Rc<X86Value>) -> Result<Rc<X86Value>, Box<dyn Error>>
@@ -384,14 +404,20 @@ impl<Output> X86CodeGenorator<Output>
             return self.deref_large(value_reg, size);
         }
 
-        let to_register_or_none = self.register_allocator.borrow_mut().allocate(register::DWORD);
-        assert!(to_register_or_none.is_some());
+        let result = match &value_reg.location
+        {
+            X86StorageLocation::Deref(register, _) =>
+            {
+                self.emit_line(format!("mov {}, {}", register, value_reg.location))?;
+                self.new_value(X86StorageLocation::Register(
+                    register.clone()))
+            },
 
-        let to_register = to_register_or_none.unwrap();
-        self.emit_line(format!("mov {}, {}",
-            to_register, value_reg.location))?;
+            _ => panic!(),
+        };
 
-        Ok(self.new_value(X86StorageLocation::Register(to_register)))
+        std::mem::forget(value_reg);
+        Ok(result)
     }
 
     fn arithmatic_operation(&mut self, lhs: Rc<X86Value>, rhs: Rc<X86Value>, operator: &str)
@@ -641,51 +667,55 @@ impl<Output> CodeGenortator<X86Value> for X86CodeGenorator<Output>
             _ => panic!(),
         };
 
-        match &value.location
+        let mut should_forget = false;
+        let result = match &value.location
         {
             X86StorageLocation::Local(offset, _) =>
             {
-                Ok(self.new_value(X86StorageLocation::Local(
-                    offset + field_offset, field_size)))
+                self.new_value(X86StorageLocation::Local(
+                    offset + field_offset, field_size))
             },
 
-            X86StorageLocation::Stack(position, _) =>
+            X86StorageLocation::StackValue(position, _) =>
             {
                 assert!(self.register_allocator.borrow().is_stack_postion_top(*position));
-                Ok(self.new_value(X86StorageLocation::Stack(
-                    field_offset as usize, field_size)))
+                self.new_value(X86StorageLocation::StackReference(
+                    *position, field_offset as usize, field_size))
+            },
+
+            X86StorageLocation::StackReference(position, offset, _) =>
+            {
+                assert!(self.register_allocator.borrow().is_stack_postion_top(*position));
+                self.new_value(X86StorageLocation::StackReference(
+                    *position, offset + field_offset as usize, field_size))
             },
 
             X86StorageLocation::Deref(register, _) =>
             {
+                should_forget = true;
                 self.emit_line(format!("add {}, {}", register, field_offset))?;
-                Ok(self.new_value(X86StorageLocation::Deref(
-                    register.clone(), field_size)))
+                self.new_value(X86StorageLocation::Deref(
+                    register.clone(), field_size))
             },
 
             _ => panic!(),
+        };
+
+        if should_forget {
+            std::mem::forget(value);
         }
+        Ok(result)
     }
 
     // FIXME: This is a really long function, it needs cleaning up.
-    fn call<Arguments>(&mut self, function_name: &str, arguments: Arguments,
-                       return_size: usize)
-            -> Result<Rc<X86Value>, Box<dyn Error>>
-        where Arguments: DoubleEndedIterator<Item = (Rc<X86Value>, usize)> + Clone
+    fn call<F>(&mut self, function_name: &str,
+               argument_count: usize,
+               mut compile_argument: F,
+               return_size: usize) -> Result<Rc<X86Value>, Box<dyn Error>>
+        where F: FnMut(&mut Self, usize) -> Result<(Rc<X86Value>, usize), Box<dyn Error>>
     {
         // FIXME: We're clobbering a lot of registers here,
         //        we should probable account for that.
-
-        for (argument, _) in arguments.clone()
-        {
-            // FIXME: This seems a little hacky to me, there's probably a much 
-            //        better way of doing this.
-            
-            // NOTE: If this value is on the stack, don't free it.
-            if !matches!(argument.location, X86StorageLocation::Stack{..}) {
-                // FIXME: What happens here?
-            }
-        }
 
         let is_eax_in_use = self.register_allocator.borrow_mut().in_use(X86Register::eax());
         if is_eax_in_use {
@@ -703,8 +733,9 @@ impl<Output> CodeGenortator<X86Value> for X86CodeGenorator<Output>
         assert!(!(is_eax_in_use && is_big_return));
 
         let mut total_argument_size = 0;
-        for (argument, size) in arguments.rev()
+        for i in (0..argument_count).rev()
         {
+            let (argument, size) = compile_argument(self, i)?;
             self.label("Argument")?;
             self.push(argument, size)?;
             total_argument_size += size;
@@ -717,7 +748,7 @@ impl<Output> CodeGenortator<X86Value> for X86CodeGenorator<Output>
         if is_big_return
         {
             let position = self.register_allocator.borrow_mut().pushed_value_on_stack(return_size);
-            return Ok(self.new_value(X86StorageLocation::Stack(position, return_size)));
+            return Ok(self.new_value(X86StorageLocation::StackValue(position, return_size)));
         }
 
         let result_register_or_none = self.register_allocator.borrow_mut().allocate(register::DWORD);

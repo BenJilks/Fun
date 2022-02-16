@@ -342,30 +342,31 @@ fn compile_call<Gen, Value>(gen: &mut Gen, scope: &mut Scope<Value>, call: &Call
             function.params.len(), function_name, call.arguments.len())));
     }
 
-    let mut arguments = Vec::new();
-    for (i, argument_expression) in call.arguments.iter().enumerate()
+    let return_size = match &function.return_type
     {
-        let data_type = derive_data_type(scope, &argument_expression)?;
-        if !function.is_extern && i < function.params.len() && data_type != function.params[i]
+        Some(return_type) => size_of(scope, return_type)?,
+        None => 0,
+    };
+
+    let argument_count = call.arguments.len();
+    let compile_argument = |gen: &mut Gen, index: usize| -> Result<_, Box<dyn Error>>
+    {
+        let argument_expression = &call.arguments[index];
+        let data_type = derive_data_type(scope, argument_expression)?;
+        if !function.is_extern && index < function.params.len() && data_type != function.params[index]
         {
             let token = argument_expression.token().unwrap_or(function_name_token);
             return Err(CompilerError::new(token, format!(
                 "Expected argument of type '{:?}', got '{:?}' instead",
-                function.params[i], data_type)));
+                function.params[index], data_type)));
         }
 
         let value = compile_expression(gen, scope, argument_expression)?;
         let size = size_of(scope, &data_type)?;
-        arguments.push((value, size));
-    }
-
-    let return_size = match function.return_type
-    {
-        Some(return_type) => size_of(scope, &return_type)?,
-        None => 0,
+        Ok((value, size))
     };
 
-    gen.call(&signature, arguments.into_iter(), return_size)
+    gen.call(&signature, argument_count, compile_argument, return_size)
 }
 
 pub fn compile_expression<Gen, Value>(gen: &mut Gen, scope: &mut Scope<Value>,

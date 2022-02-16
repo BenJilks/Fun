@@ -93,7 +93,7 @@ impl RegisterAllocator
         // TODO: We don't need to take up a whole register
         //       if we're only using a single byte.
 
-        for letter in &['a', 'b', 'c']
+        for letter in &['a', 'b', 'c', 'd']
         {
             if self.registers_in_use.contains(&letter) {
                 continue;

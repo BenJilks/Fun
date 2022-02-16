@@ -10,7 +10,8 @@ pub enum X86StorageLocation
     Register(X86Register),
     Deref(X86Register, usize),
     Local(i32, usize),
-    Stack(usize, usize),
+    StackValue(usize, usize),
+    StackReference(usize, usize, usize),
     Constant(String),
     I32(i32),
     I8(i8),
@@ -33,7 +34,10 @@ impl fmt::Display for X86StorageLocation
             X86StorageLocation::Local(ebp_offset, size) =>
                 write!(f, "{}", X86Register::ebp().offset(*size, *ebp_offset)),
 
-            X86StorageLocation::Stack(esp_offset, size) =>
+            // FIXME: Check this is top of stack still?
+            X86StorageLocation::StackValue(_, size) =>
+                write!(f, "{}", X86Register::esp().offset(*size, 0)),
+            X86StorageLocation::StackReference(_, esp_offset, size) =>
                 write!(f, "{}", X86Register::esp().offset(*size, *esp_offset as i32)),
             
             // TODO: Proper error here.
@@ -64,7 +68,7 @@ impl Drop for X86Value
             X86StorageLocation::Deref(register, _) => 
                 self.allocator.borrow_mut().free(register.clone()),
 
-            X86StorageLocation::Stack(position, size) =>
+            X86StorageLocation::StackValue(position, size) =>
             {
                 self.allocator.borrow_mut().poped_value_on_stack(*position, *size);
                 writeln!(self.output.borrow_mut(), "; Free stack value").unwrap();
@@ -72,6 +76,7 @@ impl Drop for X86Value
             },
 
             X86StorageLocation::Null => {},
+            X86StorageLocation::StackReference(_, _, _) => {},
             X86StorageLocation::Local(_, _) => {},
             X86StorageLocation::Constant(_) => {},
             X86StorageLocation::I32(_) => {},

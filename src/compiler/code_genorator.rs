@@ -34,9 +34,11 @@ pub trait CodeGenortator<Value>
     fn goto(&mut self, label: &str) -> Result<(), Box<dyn Error>>;
     fn goto_if_not(&mut self, label: &str, condition: Rc<Value>) -> Result<(), Box<dyn Error>>;
 
-    fn call<Arguments>(&mut self, function_name: &str, arguments: Arguments, return_size: usize)
-            -> Result<Rc<Value>, Box<dyn Error>>
-        where Arguments: DoubleEndedIterator<Item = (Rc<Value>, usize)> + Clone;
+    fn call<F>(&mut self, function_name: &str,
+               argument_count: usize,
+               compile_argument: F,
+               return_size: usize) -> Result<Rc<Value>, Box<dyn Error>>
+        where F: FnMut(&mut Self, usize) -> Result<(Rc<Value>, usize), Box<dyn Error>>;
 
     fn start_function(&mut self, function_name: &str,
                       params: impl Iterator<Item = usize>)

@@ -1,74 +1,38 @@
 use std::fmt;
 use std::collections::HashSet;
 
-#[derive(PartialEq, Eq, Hash, Clone, Copy, Debug)]
-pub enum X86Size
-{
-    Dword,
-    Byte,
-    Big(usize),
-}
-
-impl fmt::Display for X86Size
-{
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result
-    {
-        match self
-        {
-            Self::Dword => write!(f, "dword"),
-            Self::Byte => write!(f, "byte"),
-            Self::Big(_) => panic!(),
-        }
-    }
-}
-
-impl X86Size
-{
-
-    pub fn from_bytes(bytes: usize) -> Self
-    {
-        match bytes
-        {
-            4 => Self::Dword,
-            1 => Self::Byte,
-            bytes => Self::Big(bytes),
-        }
-    }
-
-    pub fn bytes(&self) -> usize
-    {
-        match self
-        {
-            Self::Dword => 4,
-            Self::Byte => 1,
-            Self::Big(bytes) => *bytes,
-        }
-    }
-
-}
+pub const DWORD: usize = 4;
+pub const BYTE: usize = 4;
 
 #[derive(PartialEq, Eq, Hash, Clone, Debug)]
 pub enum X86Register
 {
-    General(char, X86Size),
+    General(char, usize),
     Special(&'static str),
 }
 
 impl X86Register
 {
     
-    pub fn eax() -> Self { Self::General('a', X86Size::Dword) }
+    pub fn eax() -> Self { Self::General('a', DWORD) }
     pub fn esp() -> Self { Self::Special("esp") }
     pub fn ebp() -> Self { Self::Special("ebp") }
 
-    pub fn offset(&self, size: X86Size, offset: i32) -> String
+    pub fn offset(&self, size: usize, offset: i32) -> String
     {
+        let size_name = match size
+        {
+            x if x == DWORD => "dword",
+            x if x == BYTE => "byte",
+            _ => panic!(),
+        };
+
         if offset == 0 {
-            format!("{} [{}]", size, self)
+            format!("{} [{}]", size_name, self)
         } else if offset >= 0 {
-            format!("{} [{}+{}]", size, self, offset)
+            format!("{} [{}+{}]", size_name, self, offset)
         } else {
-            format!("{} [{}-{}]", size, self, -offset)
+            format!("{} [{}-{}]", size_name, self, -offset)
         }
     }
 
@@ -82,11 +46,11 @@ impl fmt::Display for X86Register
         match self
         {
             Self::General(letter, size) =>
-                match size
+                match *size
                 {
-                    X86Size::Dword => write!(f, "e{}x", letter),
-                    X86Size::Byte => write!(f, "{}l", letter),
-                    X86Size::Big(_) => panic!(),
+                    x if x == DWORD => write!(f, "e{}x", letter),
+                    x if x == BYTE => write!(f, "{}l", letter),
+                    _ => panic!(),
                 },
 
             Self::Special(reg) =>
@@ -124,7 +88,7 @@ impl RegisterAllocator
         }
     }
 
-    pub fn allocate(&mut self, size: X86Size) -> Option<X86Register>
+    pub fn allocate(&mut self, size: usize) -> Option<X86Register>
     {
         // TODO: We don't need to take up a whole register
         //       if we're only using a single byte.

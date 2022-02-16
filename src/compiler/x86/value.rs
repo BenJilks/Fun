@@ -1,4 +1,4 @@
-use super::register::{X86Register, X86Size, RegisterAllocator};
+use super::register::{X86Register, RegisterAllocator};
 use std::fmt;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -8,9 +8,9 @@ pub enum X86StorageLocation
 {
     Null,
     Register(X86Register),
-    Deref(X86Register, X86Size),
-    Local(i32, X86Size),
-    Stack(usize, X86Size),
+    Deref(X86Register, usize),
+    Local(i32, usize),
+    Stack(usize, usize),
     Constant(String),
     I32(i32),
     I8(i8),
@@ -66,9 +66,9 @@ impl Drop for X86Value
 
             X86StorageLocation::Stack(position, size) =>
             {
-                self.allocator.borrow_mut().poped_value_on_stack(*position, size.bytes());
+                self.allocator.borrow_mut().poped_value_on_stack(*position, *size);
                 writeln!(self.output.borrow_mut(), "; Free stack value").unwrap();
-                writeln!(self.output.borrow_mut(), "add esp, {}", size.bytes()).unwrap();
+                writeln!(self.output.borrow_mut(), "add esp, {}", size).unwrap();
             },
 
             X86StorageLocation::Null => {},

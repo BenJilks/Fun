@@ -182,9 +182,8 @@ fn compile_access<Gen, Value>(gen: &mut Gen, scope: &mut Scope<Value>,
                             field_name, struct_name)));
                     }
 
-                    let (field, data_type) = field_or_none.unwrap();
-                    let size = size_of(scope, &data_type)?;
-                    gen.access(lhs_value, field, size)
+                    let (field, _) = field_or_none.unwrap();
+                    gen.access(lhs_value, field)
                 },
 
                 DataType::Generic(argument, struct_name) =>
@@ -209,9 +208,8 @@ fn compile_access<Gen, Value>(gen: &mut Gen, scope: &mut Scope<Value>,
                             field_name, struct_name)));
                     }
 
-                    let (field, data_type) = field_or_none.unwrap();
-                    let size = size_of(scope, &data_type)?;
-                    gen.access(lhs_value, field, size)
+                    let (field, _) = field_or_none.unwrap();
+                    gen.access(lhs_value, field)
                 },
 
                 _ => panic!(),

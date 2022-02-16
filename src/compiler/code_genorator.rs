@@ -29,7 +29,7 @@ pub trait CodeGenortator<Value>
 
     fn ref_of(&mut self, value: Rc<Value>) -> Result<Rc<Value>, Box<dyn Error>>;
     fn deref(&mut self, value: Rc<Value>, size: usize) -> Result<Rc<Value>, Box<dyn Error>>;
-    fn access(&mut self, value: Rc<Value>, field: Rc<Value>, size: usize) -> Result<Rc<Value>, Box<dyn Error>>;
+    fn access(&mut self, value: Rc<Value>, field: Rc<Value>) -> Result<Rc<Value>, Box<dyn Error>>;
     fn ret(&mut self, value: Rc<Value>, size: usize, to: Option<Rc<Value>>) -> Result<(), Box<dyn Error>>;
     fn goto(&mut self, label: &str) -> Result<(), Box<dyn Error>>;
     fn goto_if_not(&mut self, label: &str, condition: Rc<Value>) -> Result<(), Box<dyn Error>>;

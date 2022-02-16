@@ -4,31 +4,6 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::io::Write;
 
-#[derive(PartialEq, Clone, Debug)]
-pub enum X86DataType
-{
-    Null,
-    Register,
-    BigData,
-    StructData,
-    ArrayData,
-    Deref(usize),
-}
-
-impl X86DataType
-{
-
-    pub fn for_size(size: usize) -> Self
-    {
-        if size <= 4 {
-            X86DataType::Register
-        } else {
-            X86DataType::BigData
-        }
-    }
-
-}
-
 pub enum X86StorageLocation
 {
     Null,
@@ -72,7 +47,6 @@ impl fmt::Display for X86StorageLocation
 pub struct X86Value
 {
     pub location: X86StorageLocation,
-    pub data_type: X86DataType,
     pub allocator: Rc<RefCell<RegisterAllocator>>,
     pub output: Rc<RefCell<dyn Write>>,
 }

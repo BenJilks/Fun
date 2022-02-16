@@ -61,18 +61,18 @@ impl fmt::Display for X86Register
 }
 
 #[derive(Debug)]
-pub struct RegisterAllocator
+pub struct Allocator
 {
     registers_in_use: HashSet<char>,
     data_stack_size: usize,
 }
 
-impl RegisterAllocator
+impl Allocator
 {
 
-    pub fn new() -> RegisterAllocator
+    pub fn new() -> Allocator
     {
-        RegisterAllocator
+        Allocator
         {
             registers_in_use: HashSet::new(),
             data_stack_size: 0,
@@ -140,9 +140,9 @@ impl RegisterAllocator
         self.data_stack_size -= size;
     }
 
-    pub fn is_stack_postion_top(&self, position: usize) -> bool
+    pub fn stack_offset(&self, position: usize) -> usize
     {
-        self.data_stack_size == position
+        self.data_stack_size - position
     }
 
 }

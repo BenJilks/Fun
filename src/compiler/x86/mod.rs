@@ -1,6 +1,6 @@
-mod register;
+mod memory;
 mod value;
-use register::{X86Register, RegisterAllocator};
+use memory::{X86Register, Allocator};
 use value::{X86Value, X86StorageLocation};
 use super::CodeGenortator;
 use std::str::from_utf8;
@@ -14,7 +14,7 @@ pub struct X86CodeGenorator<Output>
     where Output: Write + 'static
 {
     output: Output,
-    register_allocator: Rc<RefCell<RegisterAllocator>>,
+    allocator: Rc<RefCell<Allocator>>,
     
     label_count: usize,
     strings: HashMap<String, Rc<X86Value>>,
@@ -33,7 +33,7 @@ impl<Output> X86CodeGenorator<Output>
         let mut gen = Self
         {
             output: output,
-            register_allocator: Rc::from(RefCell::from(RegisterAllocator::new())),
+            allocator: Rc::from(RefCell::from(Allocator::new())),
             label_count: 0,
             strings: HashMap::new(),
             externs: HashSet::new(),
@@ -52,7 +52,7 @@ impl<Output> X86CodeGenorator<Output>
         Rc::from(X86Value
         {
             location,
-            allocator: self.register_allocator.clone(),
+            allocator: self.allocator.clone(),
             output: self.function_buffer.clone(),
         })
     }
@@ -96,7 +96,7 @@ impl<Output> X86CodeGenorator<Output>
     fn move_to_register(&mut self, stack_value: Rc<X86Value>)
         -> Result<Rc<X86Value>, Box<dyn Error>>
     {
-        let register_or_none = self.register_allocator.borrow_mut().allocate(register::DWORD);
+        let register_or_none = self.allocator.borrow_mut().allocate(memory::DWORD);
         if register_or_none.is_none() {
             panic!(); // TODO
         }
@@ -173,20 +173,20 @@ impl<Output> X86CodeGenorator<Output>
             size, to_register, to_offset, from_register, from_offset))?;
 
         // TODO: We should use the stack if no registers are available.
-        let temp_or_none = self.register_allocator.borrow_mut().allocate(register::DWORD);
+        let temp_or_none = self.allocator.borrow_mut().allocate(memory::DWORD);
         assert!(temp_or_none.is_some());
 
         let temp = temp_or_none.unwrap();
         for i in (0..size as i32).step_by(4)
         {
             self.emit_line(format!("mov {}, {}",
-                temp, from_register.offset(register::DWORD, from_offset + i)))?;
+                temp, from_register.offset(memory::DWORD, from_offset + i)))?;
 
             self.emit_line(format!("mov {}, {}",
-                to_register.offset(register::DWORD, to_offset + i), temp))?;
+                to_register.offset(memory::DWORD, to_offset + i), temp))?;
         }
 
-        self.register_allocator.borrow_mut().free(temp);
+        self.allocator.borrow_mut().free(temp);
         Ok(())
     }
 
@@ -196,7 +196,6 @@ impl<Output> X86CodeGenorator<Output>
         match to.location
         {
             X86StorageLocation::Local(to_offset, _) =>
-            {
                 match &from.location
                 {
                     X86StorageLocation::Local(from_offset, from_size) =>
@@ -207,26 +206,64 @@ impl<Output> X86CodeGenorator<Output>
                             X86Register::ebp(), *from_offset)?;
                     },
 
-                    X86StorageLocation::StackValue(position, from_size) =>
+                    X86StorageLocation::StackValue(from_position, from_size) =>
                     {
-                        assert!(self.register_allocator.borrow().is_stack_postion_top(*position));
+                        let from_offset = self.allocator.borrow().stack_offset(*from_position);
                         assert_eq!(size, *from_size);
                         self.mem_copy(size,
                             X86Register::ebp(), to_offset,
-                            X86Register::esp(), 0)?;
+                            X86Register::esp(), from_offset as i32)?;
                     },
 
-                    X86StorageLocation::StackReference(position, offset, from_size) =>
+                    X86StorageLocation::StackReference(from_position, from_ref_offset, from_size) =>
                     {
-                        assert!(self.register_allocator.borrow().is_stack_postion_top(*position));
+                        let from_value_offset = self.allocator.borrow().stack_offset(*from_position);
+                        let from_offset = from_value_offset + from_ref_offset;
                         assert_eq!(size, *from_size);
                         self.mem_copy(size,
                             X86Register::ebp(), to_offset,
-                            X86Register::esp(), *offset as i32)?;
+                            X86Register::esp(), from_offset as i32)?;
                     },
 
                     // TODO: Implement this
                     X86StorageLocation::Constant(_) => panic!(),
+
+                    // TODO: Proper error here.
+                    _ => panic!(),
+                },
+
+            X86StorageLocation::StackReference(to_position, to_ref_offset, size) =>
+            {
+                let to_value_offset = self.allocator.borrow().stack_offset(to_position);
+                let to_offset = to_value_offset + to_ref_offset;
+                match &from.location
+                {
+                    X86StorageLocation::Local(from_offset, from_size) =>
+                    {
+                        assert_eq!(size, *from_size);
+                        self.mem_copy(size,
+                            X86Register::esp(), to_offset as i32, 
+                            X86Register::ebp(), *from_offset)?;
+                    },
+
+                    X86StorageLocation::StackValue(from_position, from_size) =>
+                    {
+                        let from_offset = self.allocator.borrow().stack_offset(*from_position);
+                        assert_eq!(size, *from_size);
+                        self.mem_copy(size,
+                            X86Register::esp(), to_offset as i32,
+                            X86Register::esp(), from_offset as i32)?;
+                    },
+
+                    X86StorageLocation::StackReference(from_position, from_ref_offset, from_size) =>
+                    {
+                        let from_value_offset = self.allocator.borrow().stack_offset(*from_position);
+                        let from_offset = from_value_offset + from_ref_offset;
+                        assert_eq!(size, *from_size);
+                        self.mem_copy(size,
+                            X86Register::esp(), to_offset as i32,
+                            X86Register::esp(), from_offset as i32)?;
+                    },
 
                     // TODO: Proper error here.
                     _ => panic!(),
@@ -286,14 +323,14 @@ impl<Output> X86CodeGenorator<Output>
         }
         else 
         {
-            let temp_register_or_none = self.register_allocator.borrow_mut().allocate(register::BYTE);
+            let temp_register_or_none = self.allocator.borrow_mut().allocate(memory::BYTE);
             assert!(temp_register_or_none.is_some());
 
             let temp_register = temp_register_or_none.unwrap();
             self.emit_line(format!("sub esp, {}", size))?;
             self.emit_line(format!("mov {}, {}", temp_register, computed_value.location))?;
             self.emit_line(format!("mov [esp], {}", temp_register))?;
-            self.register_allocator.borrow_mut().free(temp_register);
+            self.allocator.borrow_mut().free(temp_register);
         }
         Ok(())
     }
@@ -314,7 +351,7 @@ impl<Output> X86CodeGenorator<Output>
             _ => panic!(),
         }
 
-        let position = self.register_allocator.borrow_mut().pushed_value_on_stack(size);
+        let position = self.allocator.borrow_mut().pushed_value_on_stack(size);
         Ok(self.new_value(X86StorageLocation::StackValue(position, size)))
     }
 
@@ -371,7 +408,7 @@ impl<Output> X86CodeGenorator<Output>
         let lhs_reg = self.ensure_register(computed_lhs)?;
         self.emit_line(format!("cmp {}, {}", lhs_reg.location, computed_rhs.location))?;
 
-        let result_register_or_none = self.register_allocator.borrow_mut().allocate(register::BYTE);
+        let result_register_or_none = self.allocator.borrow_mut().allocate(memory::BYTE);
         assert!(result_register_or_none.is_some());
 
         let result_register = result_register_or_none.unwrap();
@@ -451,7 +488,7 @@ impl<Output> CodeGenortator<X86Value> for X86CodeGenorator<Output>
             -> Result<Rc<X86Value>, Box<dyn Error>>
         where F: FnMut(&mut Self, usize) -> Result<(Rc<X86Value>, Rc<X86Value>), Box<dyn Error>>
     {
-        let position = self.register_allocator.borrow_mut().pushed_value_on_stack(struct_size);
+        let position = self.allocator.borrow_mut().pushed_value_on_stack(struct_size);
         self.emit_line(format!("sub esp, {}", struct_size))?;
         
         for i in 0..field_count
@@ -478,7 +515,7 @@ impl<Output> CodeGenortator<X86Value> for X86CodeGenorator<Output>
         where F: FnMut(&mut Self, usize) -> Result<Rc<X86Value>, Box<dyn Error>>
     {
         let size = item_count * item_size;
-        let position = self.register_allocator.borrow_mut().pushed_value_on_stack(size);
+        let position = self.allocator.borrow_mut().pushed_value_on_stack(size);
         self.emit_line(format!("sub esp, {}", size))?;
 
         for i in 0..item_count
@@ -552,7 +589,7 @@ impl<Output> CodeGenortator<X86Value> for X86CodeGenorator<Output>
         {
             X86StorageLocation::Local(offset, _) =>
             {
-                let register_or_none = self.register_allocator.borrow_mut().allocate(register::DWORD);
+                let register_or_none = self.allocator.borrow_mut().allocate(memory::DWORD);
                 if register_or_none.is_none() {
                     panic!(); // TODO: Proper error here.
                 }
@@ -618,14 +655,12 @@ impl<Output> CodeGenortator<X86Value> for X86CodeGenorator<Output>
 
             X86StorageLocation::StackValue(position, _) =>
             {
-                assert!(self.register_allocator.borrow().is_stack_postion_top(*position));
                 self.new_value(X86StorageLocation::StackReference(
                     *position, field_offset as usize, field_size))
             },
 
             X86StorageLocation::StackReference(position, offset, _) =>
             {
-                assert!(self.register_allocator.borrow().is_stack_postion_top(*position));
                 self.new_value(X86StorageLocation::StackReference(
                     *position, offset + field_offset as usize, field_size))
             },
@@ -657,7 +692,7 @@ impl<Output> CodeGenortator<X86Value> for X86CodeGenorator<Output>
         // FIXME: We're clobbering a lot of registers here,
         //        we should probable account for that.
 
-        let is_eax_in_use = self.register_allocator.borrow_mut().in_use(X86Register::eax());
+        let is_eax_in_use = self.allocator.borrow_mut().in_use(X86Register::eax());
         if is_eax_in_use {
             self.emit_line(format!("push eax"))?;
         }
@@ -687,17 +722,17 @@ impl<Output> CodeGenortator<X86Value> for X86CodeGenorator<Output>
 
         if is_big_return
         {
-            let position = self.register_allocator.borrow_mut().pushed_value_on_stack(return_size);
+            let position = self.allocator.borrow_mut().pushed_value_on_stack(return_size);
             return Ok(self.new_value(X86StorageLocation::StackValue(position, return_size)));
         }
 
-        let result_register_or_none = self.register_allocator.borrow_mut().allocate(register::DWORD);
+        let result_register_or_none = self.allocator.borrow_mut().allocate(memory::DWORD);
         assert!(result_register_or_none.is_some());
 
         let result_register = result_register_or_none.unwrap();
         match result_register
         {
-            X86Register::General('a', register::DWORD) => {},
+            X86Register::General('a', memory::DWORD) => {},
             _ => self.emit_line(format!("mov {}, eax", result_register))?,
         }
 

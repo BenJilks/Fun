@@ -1,4 +1,4 @@
-use super::register::{X86Register, RegisterAllocator};
+use super::memory::{X86Register, Allocator};
 use std::fmt;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -47,7 +47,7 @@ impl fmt::Display for X86StorageLocation
 pub struct X86Value
 {
     pub location: X86StorageLocation,
-    pub allocator: Rc<RefCell<RegisterAllocator>>,
+    pub allocator: Rc<RefCell<Allocator>>,
     pub output: Rc<RefCell<Option<Vec<u8>>>>,
 }
 

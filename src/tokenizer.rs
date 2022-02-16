@@ -9,7 +9,7 @@ use std::error::Error;
 #[derive(Clone, Debug, PartialEq)]
 pub enum TokenType
 {
-    Func,
+    Fun,
     Return,
     Struct,
     Let,
@@ -57,7 +57,7 @@ impl fmt::Display for TokenType
     {
         match self
         {
-            Self::Func => write!(f, "func"),
+            Self::Fun => write!(f, "fun"),
             Self::Return => write!(f, "return"),
             Self::Struct => write!(f, "struct"),
             Self::Let => write!(f, "let"),
@@ -279,8 +279,8 @@ fn handle_initial(byte: u8,
 
 fn parse_identifier(text: &str) -> TokenType
 {
-    if text == "func" {
-        TokenType::Func
+    if text == "fun" {
+        TokenType::Fun
     } else if text == "return" {
         TokenType::Return
     } else if text == "struct" {

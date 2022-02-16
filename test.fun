@@ -2,14 +2,18 @@
 extern printf
 extern scanf
 
-func test(arr: int[3]) -> int[3]
+struct Vec
 {
-    return [arr[2] + 1, arr[1] + 1, arr[0] + 1]
+    x: int,
+    y: int,
 }
 
-func main()
+fun test() -> Vec
 {
-    let x = test([1, 2, 3])
-    printf("%d, %d, %d", x[0], x[1], x[2])
+    return new Vec { x = 1, y = 2 }
+}
+
+fun main()
+{
 }
 

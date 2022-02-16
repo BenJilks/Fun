@@ -102,7 +102,7 @@ pub fn parse(source_file_path: impl AsRef<Path>)
         let token = token_or_none.unwrap();
         match token.token_type()
         {
-            TokenType::Func => output.functions.push(parse_function(&mut tokens)?),
+            TokenType::Fun => output.functions.push(parse_function(&mut tokens)?),
             TokenType::Struct => output.structs.push(parse_struct(&mut tokens)?),
             TokenType::Extern => output.externs.push(tokens.next().unwrap()),
 
@@ -110,7 +110,7 @@ pub fn parse(source_file_path: impl AsRef<Path>)
             {
                 return Err(Box::from(UnexpectedError
                 {
-                    expected: TokenType::Func,
+                    expected: TokenType::Fun,
                     got: Some(token)
                 }));
             },

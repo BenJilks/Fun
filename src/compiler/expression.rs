@@ -47,19 +47,20 @@ fn compile_initilizer_list<Gen, Value>(gen: &mut Gen, scope: &mut Scope<Value>,
     assert!(struct_or_none.is_some());
 
     let struct_layout = struct_or_none.unwrap();
-    let mut struct_data = Vec::new();
-    for (name, expression) in &initilizer_list.list
+    let struct_size = size_of(scope, &initilizer_list.data_type)?;
+    let field_count = initilizer_list.list.len();
+    let compile_field = |gen: &mut Gen, index: usize|
     {
+        let (name, expression) = &initilizer_list.list[index];
         let field_or_none = struct_layout.lookup(name.content());
         assert!(field_or_none.is_some());
 
-        let (field, data_type) = field_or_none.unwrap();
+        let (field, _) = field_or_none.unwrap();
         let value = compile_expression(gen, scope, expression)?;
-        let size = size_of(scope, &data_type)?;
-        struct_data.push((field, value, size));
-    }
+        Ok((field, value))
+    };
 
-    Ok(gen.emit_struct_data(struct_data)?)
+    Ok(gen.emit_struct_data(struct_size, field_count, compile_field)?)
 }
 
 fn compile_array_literal<Gen, Value>(gen: &mut Gen, scope: &mut Scope<Value>,
@@ -70,15 +71,14 @@ fn compile_array_literal<Gen, Value>(gen: &mut Gen, scope: &mut Scope<Value>,
     assert!(array.len() > 0);
     let item_type = derive_data_type(scope, &array[0])?;
     let item_size = size_of(scope, &item_type)?;
-
-    let mut array_values = Vec::new();
-    for item in array
+    let item_count = array.len();
+    let compile_item = move |gen: &mut Gen, index: usize|
     {
-        let value = compile_expression(gen, scope, item)?;
-        array_values.push(value);
-    }
+        let item = &array[index];
+        Ok(compile_expression(gen, scope, item)?)
+    };
 
-    Ok(gen.emit_array_literal(array_values, item_size)?)
+    Ok(gen.emit_array_literal(item_count, compile_item, item_size)?)
 }
 
 fn compile_add<Gen, Value>(gen: &mut Gen, scope: &mut Scope<Value>,

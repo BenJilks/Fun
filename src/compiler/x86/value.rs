@@ -15,8 +15,6 @@ pub enum X86StorageLocation
     Constant(String),
     I32(i32),
     I8(i8),
-    StructData(Vec<(i32, Rc<X86Value>, usize)>),
-    ArrayData(Vec<Rc<X86Value>>, usize),
 }
 
 impl fmt::Display for X86StorageLocation
@@ -42,8 +40,6 @@ impl fmt::Display for X86StorageLocation
             
             // TODO: Proper error here.
             X86StorageLocation::Null => panic!(),
-            X86StorageLocation::StructData(_) => panic!(),
-            X86StorageLocation::ArrayData(_, _) => panic!(),
         }
     }
 }
@@ -52,7 +48,7 @@ pub struct X86Value
 {
     pub location: X86StorageLocation,
     pub allocator: Rc<RefCell<RegisterAllocator>>,
-    pub output: Rc<RefCell<dyn Write>>,
+    pub output: Rc<RefCell<Option<Vec<u8>>>>,
 }
 
 impl Drop for X86Value
@@ -71,8 +67,15 @@ impl Drop for X86Value
             X86StorageLocation::StackValue(position, size) =>
             {
                 self.allocator.borrow_mut().poped_value_on_stack(*position, *size);
-                writeln!(self.output.borrow_mut(), "; Free stack value").unwrap();
-                writeln!(self.output.borrow_mut(), "add esp, {}", size).unwrap();
+                match &mut *self.output.borrow_mut()
+                {
+                    Some(output) =>
+                    {
+                        writeln!(output, "; Free stack value").unwrap();
+                        writeln!(output, "add esp, {}", size).unwrap();
+                    },
+                    None => {},
+                }
             },
 
             X86StorageLocation::Null => {},
@@ -81,8 +84,6 @@ impl Drop for X86Value
             X86StorageLocation::Constant(_) => {},
             X86StorageLocation::I32(_) => {},
             X86StorageLocation::I8(_) => {},
-            X86StorageLocation::StructData(_) => {},
-            X86StorageLocation::ArrayData(_, _) => {},
         }
     }
 

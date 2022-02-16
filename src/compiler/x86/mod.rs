@@ -20,7 +20,7 @@ pub struct X86CodeGenorator<Output>
     strings: HashMap<String, Rc<X86Value>>,
     externs: HashSet<String>,
 
-    function_buffer: Option<Rc<RefCell<Vec<u8>>>>,
+    function_buffer: Rc<RefCell<Option<Vec<u8>>>>,
     stack_frame_size: i32,
 }
 
@@ -38,7 +38,7 @@ impl<Output> X86CodeGenorator<Output>
             strings: HashMap::new(),
             externs: HashSet::new(),
 
-            function_buffer: None,
+            function_buffer: Rc::from(RefCell::from(None)),
             stack_frame_size: 0,
         };
 
@@ -53,15 +53,15 @@ impl<Output> X86CodeGenorator<Output>
         {
             location,
             allocator: self.register_allocator.clone(),
-            output: self.function_buffer.clone().unwrap(),
+            output: self.function_buffer.clone(),
         })
     }
 
     fn emit_line(&mut self, line: String) -> Result<(), Box<dyn Error>>
     {
-        match &mut self.function_buffer
+        match &mut *self.function_buffer.borrow_mut()
         {
-            Some(buffer) => writeln!(buffer.borrow_mut(), "{}", line)?,
+            Some(buffer) => writeln!(buffer, "{}", line)?,
             None => writeln!(self.output, "{}", line)?,
         }
         Ok(())
@@ -113,51 +113,6 @@ impl<Output> X86CodeGenorator<Output>
         Ok(self.new_value(X86StorageLocation::Register(register)))
     }
 
-    fn mov_into_struct(&mut self, to: Rc<X86Value>, from: Rc<X86Value>)
-        -> Result<(), Box<dyn Error>>
-    {
-        match &from.location
-        {
-            X86StorageLocation::StructData(data) =>
-            {
-                for (offset, value, size) in data
-                {
-                    let field = self.new_value(X86StorageLocation::Local(*offset, *size));
-                    let field_value = self.access(to.clone(), field)?;
-                    self.mov(field_value, value.clone(), *size)?;
-                }
-            },
-
-            _ => panic!(),
-        }
-
-        Ok(())
-    }
-
-    fn mov_into_array(&mut self, to: Rc<X86Value>, from: Rc<X86Value>)
-        -> Result<(), Box<dyn Error>>
-    {
-        match &from.location
-        {
-            X86StorageLocation::ArrayData(data, item_size) =>
-            {
-                for (i, value) in data.into_iter().enumerate()
-                {
-                    let offset = (i * item_size) as i32;
-                    let item = self.new_value(X86StorageLocation::Local(
-                        offset, *item_size));
-                    
-                    let item_value = self.access(to.clone(), item)?;
-                    self.mov(item_value, value.clone(), *item_size)?;
-                }
-            },
-
-            _ => panic!(),
-        }
-
-        Ok(())
-    }
-
     fn ensure_moveable(&mut self, value: Rc<X86Value>)
         -> Result<Rc<X86Value>, Box<dyn Error>>
     {
@@ -172,10 +127,6 @@ impl<Output> X86CodeGenorator<Output>
             X86StorageLocation::Constant(_) => Ok(value),
             X86StorageLocation::I32(_) => Ok(value),
             X86StorageLocation::I8(_) => Ok(value),
-
-            // TODO: Proper error here.
-            X86StorageLocation::StructData(_) => panic!(),
-            X86StorageLocation::ArrayData(_, _) => panic!(),
         }
     }
 
@@ -193,21 +144,17 @@ impl<Output> X86CodeGenorator<Output>
             X86StorageLocation::Constant(_) => self.move_to_register(value),
             X86StorageLocation::I32(_) => self.move_to_register(value),
             X86StorageLocation::I8(_) => self.move_to_register(value),
-
-            // TODO: Proper error here.
-            X86StorageLocation::StructData(_) => panic!(),
-            X86StorageLocation::ArrayData(_, _) => panic!(),
         }
     }
 
     fn end_current_function(&mut self) -> Result<(), Box<dyn Error>>
     {
-        if self.function_buffer.is_none() {
+        if self.function_buffer.borrow().is_none() {
             return Ok(());
         }
 
-        let buffer_str = from_utf8(&self.function_buffer.as_ref().unwrap().borrow())?.to_owned();
-        self.function_buffer = None;
+        let buffer_str = from_utf8(&self.function_buffer.borrow().as_ref().unwrap())?.to_owned();
+        self.function_buffer.replace(None);
         self.stack_frame_size = 0;
 
         if self.stack_frame_size > 0 {
@@ -320,24 +267,6 @@ impl<Output> X86CodeGenorator<Output>
                 {
                     // FIXME: What do we do here?
                     panic!();
-                },
-
-                X86StorageLocation::StructData(data) =>
-                {
-                    let size = data.iter().map(|(_, _, x)| x).sum();
-                    self.emit_line(format!("sub esp, {}", size))?;
-
-                    let stack_top = self.new_value(X86StorageLocation::StackReference(0, 0, size));
-                    self.mov_into_struct(stack_top, value)?;
-                },
-
-                X86StorageLocation::ArrayData(values, item_size) =>
-                {
-                    let size = item_size * values.len();
-                    self.emit_line(format!("sub esp, {}", size))?;
-
-                    let stack_top = self.new_value(X86StorageLocation::StackReference(0, 0, size));
-                    self.mov_into_array(stack_top, value)?;
                 },
 
                 // TODO: Implement this
@@ -518,29 +447,51 @@ impl<Output> CodeGenortator<X86Value> for X86CodeGenorator<Output>
         self.new_value(X86StorageLocation::Local(offset, size))
     }
 
-    fn emit_struct_data(&mut self, data: impl IntoIterator<Item = (Rc<X86Value>, Rc<X86Value>, usize)>)
-        -> Result<Rc<X86Value>, Box<dyn Error>>
+    fn emit_struct_data<F>(&mut self, struct_size: usize, field_count: usize, mut compile_field: F)
+            -> Result<Rc<X86Value>, Box<dyn Error>>
+        where F: FnMut(&mut Self, usize) -> Result<(Rc<X86Value>, Rc<X86Value>), Box<dyn Error>>
     {
-        let mut stored_struct_data = Vec::new();
-        for (field, value, size) in data
+        let position = self.register_allocator.borrow_mut().pushed_value_on_stack(struct_size);
+        self.emit_line(format!("sub esp, {}", struct_size))?;
+        
+        for i in 0..field_count
         {
-            match field.location
+            let (field, value) = compile_field(self, i)?;
+            let (offset, size) = match field.location
             {
-                X86StorageLocation::Local(offset, _) =>
-                    stored_struct_data.push((offset, value, size)),
-
-                // TODO: Proper error here.
+                X86StorageLocation::Local(offset, size) => (offset, size),
                 _ => panic!(),
-            }
+            };
+
+            let item = self.new_value(X86StorageLocation::StackReference(
+                position, offset as usize, size));
+            self.mov(item, value, size)?;
         }
 
-        Ok(self.new_value(X86StorageLocation::StructData(stored_struct_data)))
+        Ok(self.new_value(X86StorageLocation::StackValue(
+            position, struct_size)))
     }
 
-    fn emit_array_literal(&mut self, array: Vec<Rc<X86Value>>, item_size: usize)
-        -> Result<Rc<X86Value>, Box<dyn Error>>
+    fn emit_array_literal<F>(&mut self, item_count: usize,
+                             mut compile_item: F, item_size: usize)
+            -> Result<Rc<X86Value>, Box<dyn Error>>
+        where F: FnMut(&mut Self, usize) -> Result<Rc<X86Value>, Box<dyn Error>>
     {
-        Ok(self.new_value(X86StorageLocation::ArrayData(array, item_size)))
+        let size = item_count * item_size;
+        let position = self.register_allocator.borrow_mut().pushed_value_on_stack(size);
+        self.emit_line(format!("sub esp, {}", size))?;
+
+        for i in 0..item_count
+        {
+            let value = compile_item(self, i)?;
+            let item = self.new_value(X86StorageLocation::StackReference(
+                position, i * item_size, item_size));
+
+            self.mov(item, value, item_size)?;
+        }
+
+        Ok(self.new_value(X86StorageLocation::StackValue(
+            position, size)))
     }
 
     fn emit_label(&mut self, label: &str) -> Result<(), Box<dyn Error>>
@@ -552,17 +503,6 @@ impl<Output> CodeGenortator<X86Value> for X86CodeGenorator<Output>
     fn mov(&mut self, to: Rc<X86Value>, from: Rc<X86Value>, size: usize)
         -> Result<(), Box<dyn Error>>
     {
-        match &from.location
-        {
-            X86StorageLocation::StructData(_) =>
-                return self.mov_into_struct(to, from),
-
-            X86StorageLocation::ArrayData(_, _) =>
-                return self.mov_into_array(to, from),
-
-            _ => {},
-        }
-
         let computed_from = self.apply_deref(from)?;
         if size > 4 {
             return self.mov_large(to, computed_from, size);
@@ -771,8 +711,6 @@ impl<Output> CodeGenortator<X86Value> for X86CodeGenorator<Output>
     fn ret(&mut self, value: Rc<X86Value>, size: usize, to: Option<Rc<X86Value>>)
         -> Result<(), Box<dyn Error>>
     {
-        assert!(self.function_buffer.is_some());
-
         self.label("Return")?;
         match to
         {
@@ -824,7 +762,7 @@ impl<Output> CodeGenortator<X86Value> for X86CodeGenorator<Output>
         self.emit_line(format!("{}:", function_name))?;
         self.emit_line(format!("push ebp"))?;
         self.emit_line(format!("mov ebp, esp"))?;
-        self.function_buffer = Some(Default::default());
+        self.function_buffer.replace(Some(Default::default()));
 
         let mut params = Vec::new();
         let mut last_offset = 0;

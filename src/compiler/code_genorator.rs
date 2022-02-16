@@ -14,11 +14,13 @@ pub trait CodeGenortator<Value>
     fn emit_struct_offset(&mut self, offset: i32, size: usize) -> Rc<Value>;
     fn emit_label(&mut self, label: &str) -> Result<(), Box<dyn Error>>;
 
-    fn emit_struct_data(&mut self, data: impl IntoIterator<Item = (Rc<Value>, Rc<Value>, usize)>)
-        -> Result<Rc<Value>, Box<dyn Error>>;
+    fn emit_struct_data<F>(&mut self, struct_size: usize, field_count: usize, field_item: F)
+            -> Result<Rc<Value>, Box<dyn Error>>
+        where F: FnMut(&mut Self, usize) -> Result<(Rc<Value>, Rc<Value>), Box<dyn Error>>;
 
-    fn emit_array_literal(&mut self, array: Vec<Rc<Value>>, item_size: usize)
-        -> Result<Rc<Value>, Box<dyn Error>>;
+    fn emit_array_literal<F>(&mut self, item_count: usize, compile_item: F, item_size: usize)
+            -> Result<Rc<Value>, Box<dyn Error>>
+        where F: FnMut(&mut Self, usize) -> Result<Rc<Value>, Box<dyn Error>>;
 
     fn mov(&mut self, to: Rc<Value>, from: Rc<Value>, size: usize) -> Result<(), Box<dyn Error>>;
     fn add(&mut self, lhs: Rc<Value>, rhs: Rc<Value>) -> Result<Rc<Value>, Box<dyn Error>>;

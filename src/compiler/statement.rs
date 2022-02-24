@@ -66,6 +66,9 @@ fn compile_block(gen: &mut IRGenorator,
             statement, return_type, return_to.clone(), end_label)?;
     }
 
+    for function in local_scope.used_functions() {
+        scope.put_used_function(function);
+    }
     Ok(())
 }
 

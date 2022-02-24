@@ -7,6 +7,7 @@ use std::rc::Rc;
 pub struct FunctionDescriptionType
 {
     pub params: Vec<DataTypeDescription>,
+    pub type_variable: Option<String>,
     pub return_type: Option<DataType>,
 }
 
@@ -23,6 +24,7 @@ pub struct CompiledFunction
     pub name: String,
     pub description: FunctionDescriptionType,
     pub params: Vec<DataType>,
+    pub type_variable: Option<DataType>,
     pub return_type: Option<DataType>,
 }
 
@@ -33,6 +35,7 @@ pub struct Scope<'a>
     structs: HashMap<String, HashMap<String, (Rc<IRValue>, DataType)>>,
     typed_structs: HashMap<String, TypedStructType>,
     function_descriptions: HashMap<String, Vec<FunctionDescriptionType>>,
+    type_aliases: HashMap<String, DataType>,
 
     // FIXME: This is hacky, externs should be no different from a 
     //        normal, compiled function.
@@ -53,6 +56,7 @@ impl<'a> Scope<'a>
             structs: Default::default(),
             typed_structs: Default::default(),
             function_descriptions: Default::default(),
+            type_aliases: Default::default(),
 
             externs: Default::default(),
             used_functions: HashSet::default(),
@@ -87,6 +91,10 @@ impl<'a> Scope<'a>
             Some(descriptions) => descriptions.push(value),
             None => { self.function_descriptions.insert(name, vec![value]); },
         }
+    }
+    pub fn put_type_alias(&mut self, name: String, value: DataType) -> bool
+    {
+        self.type_aliases.insert(name, value).is_none()
     }
     pub fn put_extern(&mut self, name: String) -> bool
     {
@@ -124,6 +132,10 @@ impl<'a> Scope<'a>
     {
         self.lookup(name, |s, n| s.function_descriptions.get(n).cloned())
             .unwrap_or(Vec::new())
+    }
+    pub fn lookup_type_alias(&self, name: &str) -> Option<DataType>
+    {
+        self.lookup(name, |s, n| s.type_aliases.get(n).cloned())
     }
     pub fn lookup_extern(&self, name: &str) -> Option<()>
     {

@@ -3,7 +3,7 @@ use super::intermediate::value::IRValue;
 use super::statement::compile_statement;
 use super::name_table::{FunctionDescriptionType, CompiledFunction};
 use super::name_table::Scope;
-use super::data_type::{size_of, derive_data_type};
+use super::data_type::{size_of, derive_data_type, resolve_type_aliases};
 use super::data_type::{function_signature, call_signature};
 use super::error::CompilerError;
 use crate::tokenizer::Token;
@@ -16,7 +16,8 @@ use std::error::Error;
 fn function_from_description(scope: &mut Scope,
                              description: FunctionDescriptionType,
                              function_name: &str,
-                             call: &Call)
+                             call: &Call,
+                             type_variable: Option<DataType>)
     -> Result<(String, CompiledFunction), Box<dyn Error>>
 {
     let params = call.arguments
@@ -24,13 +25,15 @@ fn function_from_description(scope: &mut Scope,
         .map(|argument| derive_data_type(scope, argument))
         .collect::<Result<Vec<_>, _>>()?;
 
-    let signature = call_signature(scope, function_name, call)?;
+    let type_alias = description.type_variable.as_ref().zip(type_variable.as_ref());
+    let signature = call_signature(scope, function_name, call, type_alias)?;
     let return_type = description.return_type.clone();
     let function = CompiledFunction
     {
         name: function_name.to_owned(),
         description: description,
         params,
+        type_variable,
         return_type,
     };
 
@@ -53,20 +56,32 @@ pub fn find_function_for_call(scope: &mut Scope,
         
         let param_arguements = function_description.params.iter().zip(&call.arguments);
         let mut did_match = true;
+        let mut type_variable_value = None;
         for (param, argument) in param_arguements
         {
             let argument_type = derive_data_type(scope, argument)?;
-            if !param.matches(&argument_type)
+            let (matches, param_type_variable_value) = param.matches(
+                &argument_type, &function_description.type_variable);
+
+            if !matches ||
+                (type_variable_value.is_some() &&
+                param_type_variable_value.is_some() &&
+                type_variable_value != param_type_variable_value)
             {
                 did_match = false;
                 break;
+            }
+
+            if param_type_variable_value.is_some() {
+                type_variable_value = param_type_variable_value;
             }
         }
 
         if did_match
         {
             return Ok(function_from_description(
-                scope, function_description, function_name, call)?);
+                scope, function_description, function_name, call,
+                type_variable_value)?);
         }
     }
 
@@ -83,17 +98,33 @@ pub fn find_function_for_call(scope: &mut Scope,
         description: FunctionDescriptionType
         {
             params: Vec::new(),
+            type_variable: None,
             return_type: None,
         },
         params: Vec::new(),
+        type_variable: None,
         return_type: None,
     }))
+}
+
+pub fn create_local_scope<'a>(scope: &'a mut Scope, function: &CompiledFunction)
+    -> Scope<'a>
+{
+    let mut local_scope = Scope::new(Some(scope));
+    if function.type_variable.is_some()
+    {
+        local_scope.put_type_alias(
+            function.description.type_variable.clone().unwrap(),
+            function.type_variable.clone().unwrap());
+    }
+
+    local_scope
 }
 
 fn compile_params(gen: &mut IRGenorator,
                   scope: &mut Scope,
                   function: &Function,
-                  param_types: Vec<DataType>)
+                  param_types: &Vec<DataType>)
     -> Result<Option<Rc<IRValue>>, Box<dyn Error>>
 {
     let mut param_sizes = param_types
@@ -130,16 +161,21 @@ fn compile_params(gen: &mut IRGenorator,
 pub fn compile_function(gen: &mut IRGenorator,
                         scope: &'_ mut Scope<'_>,
                         function: &Function,
-                        param_types: Vec<DataType>)
+                        function_data: &CompiledFunction)
     -> Result<HashSet<CompiledFunction>, Box<dyn Error>>
 {
     if function.body.is_none() {
         return Ok(Default::default());
     }
 
-    let mut local_scope = Scope::new(Some(scope));
-    let return_to = compile_params(gen, &mut local_scope, function, param_types)?;
-    let return_type = function.return_type.as_ref();
+    let mut local_scope = create_local_scope(scope, function_data);
+    let return_to = compile_params(gen, &mut local_scope, function, &function_data.params)?;
+    let return_type = match &function.return_type
+    {
+        Some(return_type) =>
+            Some(resolve_type_aliases(&mut local_scope, return_type.clone())),
+        None => None,
+    };
 
     let mut did_return = false;
     for statement in function.body.as_ref().unwrap()
@@ -151,7 +187,7 @@ pub fn compile_function(gen: &mut IRGenorator,
         }
 
         compile_statement(gen, &mut local_scope,
-            statement, return_type, return_to.clone(), None)?;
+            statement, return_type.as_ref(), return_to.clone(), None)?;
     }
 
     if !did_return

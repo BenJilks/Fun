@@ -1,5 +1,5 @@
 use super::name_table::Scope;
-use super::function::find_function_for_call;
+use super::function::{find_function_for_call, create_local_scope};
 use super::error::CompilerError;
 use crate::tokenizer::Token;
 use crate::ast::{Function, Expression};
@@ -102,6 +102,15 @@ fn derive_operation_type(name_table: &mut Scope,
             }
         },
 
+        OperationType::Deref =>
+        {
+            match lhs_type
+            {
+                DataType::Ref(ref_type) => Ok(*ref_type),
+                _ => panic!(),
+            }
+        },
+
         // TODO: This should actually derive type.
         OperationType::Add => Ok(DataType::Int),
         OperationType::Subtract => Ok(DataType::Int),
@@ -115,13 +124,19 @@ fn derive_operation_type(name_table: &mut Scope,
 
 pub fn call_signature(scope: &mut Scope,
                       function_name: &str,
-                      call: &Call)
+                      call: &Call,
+                      type_variable: Option<(&String, &DataType)>)
     -> Result<String, Box<dyn Error>>
 {
+    let mut local_scope = Scope::new(Some(scope));
+    if let Some((name, value)) = type_variable {
+        local_scope.put_type_alias(name.clone(), value.clone());
+    }
+
     let mut signature = function_name.to_owned();
     for argument in &call.arguments
     {
-        let data_type = derive_data_type(scope, argument)?;
+        let data_type = derive_data_type(&mut local_scope, argument)?;
         signature += &data_type_signature(&data_type);
     }
 
@@ -137,10 +152,40 @@ fn derive_call_type(scope: &mut Scope, call: &Call)
         {
             let (_, function) = find_function_for_call(scope, name, call)?;
             assert!(function.return_type.is_some());
-            Ok(function.return_type.unwrap())
+
+            let mut local_scope = create_local_scope(scope, &function);
+            Ok(resolve_type_aliases(&mut local_scope, function.return_type.unwrap()))
         },
 
         _ => panic!(),
+    }
+}
+
+pub fn resolve_type_aliases(scope: &mut Scope,
+                            data_type: DataType)
+    -> DataType
+{
+    match data_type
+    {
+        DataType::Struct(name) =>
+        {
+            match scope.lookup_type_alias(&name)
+            {
+                Some(alias) => alias,
+                None => DataType::Struct(name),
+            }
+        },
+
+        DataType::Array(array_type, size) =>
+            DataType::Array(Box::from(resolve_type_aliases(scope, *array_type)), size),
+
+        DataType::Ref(ref_type) =>
+            DataType::Ref(Box::from(resolve_type_aliases(scope, *ref_type))),
+
+        DataType::Generic(generic_type, name) =>
+            DataType::Generic(Box::from(resolve_type_aliases(scope, *generic_type)), name),
+
+        other => other,
     }
 }
 
@@ -148,7 +193,7 @@ pub fn derive_data_type(scope: &mut Scope,
                         expression: &Expression)
     -> Result<DataType, Box<dyn Error>>
 {
-    match expression
+    let result: Result<_, Box<dyn Error>> = match expression
     {
         Expression::IntLiteral(_) => Ok(DataType::Int),
         Expression::BoolLiteral(_) => Ok(DataType::Bool),
@@ -184,6 +229,12 @@ pub fn derive_data_type(scope: &mut Scope,
             let item_data_type = derive_data_type(scope, &items[0])?;
             Ok(DataType::Array(Box::from(item_data_type), items.len()))
         }
+    };
+
+    match result
+    {
+        Ok(result) => Ok(resolve_type_aliases(scope, result)),
+        Err(err) => Err(err),
     }
 }
 
@@ -250,7 +301,13 @@ pub fn size_of(scope: &Scope, data_type: &DataType)
         DataType::Ref(_) => 4,
 
         DataType::Struct(name) =>
-            size_of_struct(scope, name)?,
+        {
+            match scope.lookup_type_alias(name)
+            {
+                Some(alias) => size_of(scope, &alias)?,
+                None => size_of_struct(scope, name)?,
+            }
+        },
 
         DataType::Array(item_type, size) => 
             size_of(scope, item_type)? * size,

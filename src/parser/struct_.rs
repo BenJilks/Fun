@@ -1,4 +1,4 @@
-use super::TokenStream;
+use super::{TokenStream, parse_type_variable};
 use super::data_type::parse_data_type;
 use crate::tokenizer::{Token, TokenType};
 use crate::ast::{Struct, Field};
@@ -9,16 +9,7 @@ pub fn parse_struct(tokens: &mut Peekable<impl Iterator<Item = Token>>)
     -> Result<Struct, Box<dyn Error>>
 {
     let name = tokens.expect(TokenType::Identifier)?;
-    let type_variable =
-        if tokens.is_next(TokenType::Of)
-        {
-            tokens.expect(TokenType::Of)?;
-            Some(tokens.expect(TokenType::Identifier)?)
-        }
-        else
-        {
-            None
-        };
+    let type_variable = parse_type_variable(tokens)?;
 
     tokens.expect(TokenType::OpenSquiggly)?;
     let mut fields = Vec::new();

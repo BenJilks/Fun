@@ -78,29 +78,36 @@ impl<W> X86Output<W>
         -> Result<(), Box<dyn Error>>
     {
         let to_str = self.value_of(4, to);
-        self.emit(format!("mov {}, ebp", to_str))?;
+        let (value_register, value_offset) = self.offset_of(value);
+        self.emit(format!("mov {}, {}", to_str, value_register))?;
 
-        match value
-        {
-            IRStorage::Register(_) => panic!(),
-
-            IRStorage::Param(offset) =>
-                self.emit(format!("add {}, {}", to_str, offset + 8))?,
-
-            IRStorage::Local(offset) =>
-                self.emit(format!("sub {}, {}", to_str, offset))?,
+        if value_offset > 0 {
+            self.emit(format!("add {}, {}", to_str, value_offset))?;
+        } else if value_offset < 0 {
+            self.emit(format!("sub {}, {}", to_str, -value_offset))?;
         }
-
         Ok(())
     }
 
     fn generate_deref(&mut self, to: &IRStorage, value: &IRStorage, size: usize)
         -> Result<(), Box<dyn Error>>
     {
-        assert!(size <= 4);
-        let to_str = self.value_of(size, to);
         let value_str = self.value_of(4, value);
-        self.emit(format!("mov {}, [{}]", to_str, value_str))?;
+        if size > 4
+        {
+            let (to_register, to_offset) = self.offset_of(to);
+            let scratch_register = self.allocator.allocate_scratch_register(4);
+            self.emit(format!("mov {}, {}", scratch_register, value_str))?;
+            self.generate_copy(to_register, to_offset,
+                scratch_register.clone(), 0, size)?;
+            self.allocator.free_scratch_register(scratch_register);
+        }
+        else
+        {
+            let to_str = self.value_of(size, to);
+            self.emit(format!("mov {}, [{}]", to_str, value_str))?;
+        }
+
         Ok(())
     }
 
@@ -149,37 +156,26 @@ impl<W> X86Output<W>
                                size: usize)
         -> Result<(), Box<dyn Error>>
     {
-        let from_value = self.value_of(size, from);
-        let scratch_register = self.allocator.allocate_scratch_register(size);
-        self.emit(format!("mov {}, {}", scratch_register, from_value))?;
-
-        match to
+        let (to_register, to_offset) = self.offset_of(to);
+        if size > 4
         {
-            IRStorage::Register(register) =>
-            {
-                assert_eq!(self.allocator.allocation_type(*register), AllocationType::Stack);
-                let stack_offset = self.allocator.stack_offset(*register);
-                self.emit(format!("mov {}, {}",
-                    X86Register::esp().offset(size, stack_offset as i32 + offset as i32),
-                    scratch_register))?;
-            },
-
-            IRStorage::Param(param_offset) =>
-            {
-                self.emit(format!("mov {}, {}",
-                    X86Register::ebp().offset(size, *param_offset as i32 + 8 + offset as i32),
-                    scratch_register))?;
-            },
-
-            IRStorage::Local(local_offset) =>
-            {
-                self.emit(format!("mov {}, {}",
-                    X86Register::ebp().offset(size, -(*local_offset as i32) + offset as i32),
-                    scratch_register))?;
-            },
+            let (from_register, from_offset) = self.offset_of(from);
+            self.generate_copy(
+                to_register, to_offset + offset as i32,
+                from_register, from_offset,
+                size)?;
+        }
+        else
+        {
+            let from_value = self.value_of(size, from);
+            let scratch_register = self.allocator.allocate_scratch_register(size);
+            self.emit(format!("mov {}, {}", scratch_register, from_value))?;
+            self.emit(format!("mov {}, {}",
+                to_register.offset(size, to_offset + offset as i32),
+                scratch_register))?;
+            self.allocator.free_scratch_register(scratch_register);
         }
 
-        self.allocator.free_scratch_register(scratch_register);
         Ok(())
     }
 
@@ -194,10 +190,12 @@ impl<W> X86Output<W>
         let scratch_register = self.allocator.allocate_scratch_register(4);
         for i in (0..size as i32).step_by(4)
         {
+            let chunk_size = std::cmp::min(size - i as usize, 4);
+            let temp = scratch_register.of_size(chunk_size);
             self.emit(format!("mov {}, {}",
-                scratch_register, from_register.offset(4, from_offset + i)))?;
+                temp, from_register.offset(chunk_size, from_offset + i)))?;
             self.emit(format!("mov {}, {}",
-                to_register.offset(4, to_offset + i), scratch_register))?;
+                to_register.offset(chunk_size, to_offset + i), temp))?;
         }
 
         self.allocator.free_scratch_register(scratch_register);
@@ -231,10 +229,15 @@ impl<W> X86Output<W>
         {
             IRStorage::Register(register) =>
             {
-                if self.allocator.allocation_type(*register) == AllocationType::Register {
-                    self.allocator.register_for(*register) == X86Register::eax()
-                } else {
-                    false
+                if self.allocator.allocation_type(*register) != AllocationType::Register {
+                    return false;
+                }
+
+                let x86_register = self.allocator.register_for(*register);
+                match x86_register
+                {
+                    X86Register::General(letter, _) => letter == 'a',
+                    _ => false,
                 }
             },
 
@@ -248,7 +251,9 @@ impl<W> X86Output<W>
         if !self.is_eax(value) && size <= 4
         {
             let value_str = self.value_of(size, value);
-            self.emit(format!("mov eax, {}", value_str))?;
+            self.emit(format!("mov {}, {}",
+                X86Register::General('a', size),
+                value_str))?;
         }
 
         self.emit(format!("mov esp, ebp"))?;
@@ -339,7 +344,9 @@ impl<W> X86Output<W>
         }
         else
         {
-            self.emit(format!("mov {}, {}", to_str, lhs_str))?;
+            if lhs_str != to_str {
+                self.emit(format!("mov {}, {}", to_str, lhs_str))?;
+            }
             self.emit(format!("{} {}, {}", operation_str, to_str, rhs_str))?;
         }
 
@@ -363,7 +370,9 @@ impl<W> X86Output<W>
         }
         else
         {
-            self.emit(format!("mov {}, {}", to_str, lhs_str))?;
+            if lhs_str != to_str {
+                self.emit(format!("mov {}, {}", to_str, lhs_str))?;
+            }
             self.emit(format!("{} {}, {}", operation_str, to_str, i))?;
         }
 

@@ -17,6 +17,7 @@ pub fn parse_data_type(tokens: &mut Peekable<impl Iterator<Item = Token>>)
     {
         TokenType::Int => DataType::Int,
         TokenType::Char => DataType::Char,
+        TokenType::Bool => DataType::Bool,
         TokenType::Identifier => DataType::Struct(next.content().to_owned()),
         TokenType::Ref => DataType::Ref(Box::from(parse_data_type(tokens)?)),
         _ => panic!(),

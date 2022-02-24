@@ -84,6 +84,17 @@ impl<Iter> TokenStream for Peekable<Iter>
 
 }
 
+fn parse_type_variable(tokens: &mut Peekable<impl Iterator<Item = Token>>)
+    -> Result<Option<Token>, Box<dyn Error>>
+{
+    if !tokens.is_next(TokenType::Of) {
+        return Ok(None);
+    }
+
+    tokens.expect(TokenType::Of)?;
+    Ok(Some(tokens.expect(TokenType::Identifier)?))
+}
+
 pub fn parse(source_file_path: impl AsRef<Path>)
     -> Result<SourceFile, Box<dyn Error>>
 {

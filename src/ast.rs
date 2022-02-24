@@ -24,6 +24,7 @@ pub enum OperationType
     GreaterThan,
     LessThan,
     Ref,
+    Deref,
     Indexed,
     Access,
     Assign,
@@ -104,6 +105,7 @@ pub struct Function
 {
     pub name: Token,
     pub params: Vec<Param>,
+    pub type_variable: Option<Token>,
     pub return_type: Option<DataType>,
     pub body: Option<Vec<Statement>>,
 }

@@ -2,7 +2,7 @@ use super::intermediate::IRGenorator;
 use super::intermediate::value::IRValue;
 use super::name_table::{Scope, TypedStructType};
 use super::data_type::{size_of, derive_data_type};
-use super::function::find_function_for_call;
+use super::function::{find_function_for_call, create_local_scope};
 use super::error::CompilerError;
 use crate::tokenizer::Token;
 use crate::ast::{Expression, Operation, OperationType, Call, InitializerList};
@@ -252,6 +252,21 @@ fn compile_ref(gen: &mut IRGenorator, scope: &mut Scope,
     Ok(gen.ref_of(value))
 }
 
+fn compile_deref(gen: &mut IRGenorator, scope: &mut Scope,
+                 lhs: &Expression)
+    -> Result<Rc<IRValue>, Box<dyn Error>>
+{
+    let value = compile_expression(gen, scope, lhs)?;
+    let data_type = derive_data_type(scope, lhs)?;
+    let size = match data_type
+    {
+        DataType::Ref(ref_type) => size_of(scope, &*ref_type)?,
+        _ => panic!(),
+    };
+
+    Ok(gen.deref(value, size))
+}
+
 fn compile_assign(gen: &mut IRGenorator, scope: &mut Scope,
                   lhs: &Expression, rhs: &Expression)
     -> Result<Rc<IRValue>, Box<dyn Error>>
@@ -285,6 +300,7 @@ fn compile_operation(gen: &mut IRGenorator, scope: &mut Scope,
         OperationType::Access => compile_access(gen, scope, &operation.lhs, &operation.rhs.as_ref().unwrap()),
         OperationType::Indexed => compile_indexed(gen, scope, &operation.lhs, &operation.rhs.as_ref().unwrap()),
         OperationType::Ref => compile_ref(gen, scope, &operation.lhs),
+        OperationType::Deref => compile_deref(gen, scope, &operation.lhs),
         OperationType::Assign => compile_assign(gen, scope, &operation.lhs, &operation.rhs.as_ref().unwrap()),
     }
 }
@@ -300,9 +316,10 @@ fn compile_call(gen: &mut IRGenorator, scope: &mut Scope, call: &Call)
         };
 
     let (signature, function) = find_function_for_call(scope, function_name_token, call)?;
+    let mut local_scope = create_local_scope(scope, &function);
     let return_size = match &function.return_type
     {
-        Some(return_type) => size_of(scope, return_type)?,
+        Some(return_type) => size_of(&mut local_scope, return_type)?,
         None => 0,
     };
 

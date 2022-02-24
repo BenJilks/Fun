@@ -13,7 +13,6 @@ pub enum X86Register
 impl X86Register
 {
     
-    pub fn eax() -> Self { Self::General('a', 4) }
     pub fn ebp() -> Self { Self::Special("ebp") }
     pub fn esp() -> Self { Self::Special("esp") }
 
@@ -32,6 +31,15 @@ impl X86Register
             format!("{} [{}+{}]", size_name, self, offset)
         } else {
             format!("{} [{}-{}]", size_name, self, -offset)
+        }
+    }
+
+    pub fn of_size(&self, size: usize) -> X86Register
+    {
+        match self
+        {
+            Self::General(letter, _) => X86Register::General(*letter, size),
+            _ => panic!(),
         }
     }
 

@@ -74,9 +74,11 @@ fn register_function(scope: &mut Scope,
         .collect::<Vec<_>>();
 
     let name = function.name.content();
+    let type_variable = function.type_variable.as_ref().map(|x| x.content().to_owned());
     scope.put_function_description(name.to_owned(), FunctionDescriptionType
     {
         params,
+        type_variable,
         return_type,
     });
     Ok(())
@@ -109,10 +111,11 @@ pub fn compile(ast: SourceFile)
         description: FunctionDescriptionType
         {
             params: Vec::new(),
+            type_variable: None,
             return_type: None,
         },
-
         params: Vec::new(),
+        type_variable: None,
         return_type: None,
     });
 
@@ -125,8 +128,11 @@ pub fn compile(ast: SourceFile)
     {
         let function_data = functions_to_compile.pop().unwrap();
         let function = ast.find_function(&function_data.name, &function_data.description.params);
-        let functions_used = compile_function(&mut gen,
-            &mut scope, function.unwrap(), function_data.params)?;
+        let functions_used = compile_function(
+            &mut gen,
+            &mut scope,
+            function.unwrap(),
+            &function_data)?;
 
         for function in functions_used
         {

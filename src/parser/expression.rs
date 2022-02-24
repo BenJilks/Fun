@@ -29,7 +29,8 @@ const EXPRESSION_OPERATIONS: [(TokenType, OperationType); 1] =
     (TokenType::Equals, OperationType::Assign),
 ];
 
-fn parse_ref(tokens: &mut Peekable<impl Iterator<Item = Token>>)
+fn parse_unary(tokens: &mut Peekable<impl Iterator<Item = Token>>,
+               operation_type: OperationType)
     -> Result<Option<Expression>, Box<dyn Error>>
 {
     tokens.next();
@@ -41,7 +42,7 @@ fn parse_ref(tokens: &mut Peekable<impl Iterator<Item = Token>>)
 
     Ok(Some(Expression::Operation(Operation
     {
-        operation_type: OperationType::Ref,
+        operation_type,
         lhs: Box::from(value.unwrap()),
         rhs: None,
     })))
@@ -127,6 +128,9 @@ pub fn parse_value(tokens: &mut Peekable<impl Iterator<Item = Token>>)
         TokenType::CharLiteral => 
             Some(Expression::CharLiteral(tokens.next().unwrap())),
 
+        TokenType::BoolLiteral => 
+            Some(Expression::BoolLiteral(tokens.next().unwrap().content() == "true")),
+
         TokenType::Identifier =>
             Some(Expression::Identifier(tokens.next().unwrap())),
 
@@ -137,7 +141,10 @@ pub fn parse_value(tokens: &mut Peekable<impl Iterator<Item = Token>>)
             Some(parse_array(tokens)?),
 
         TokenType::Ref =>
-            parse_ref(tokens)?,
+            parse_unary(tokens, OperationType::Ref)?,
+
+        TokenType::Deref =>
+            parse_unary(tokens, OperationType::Deref)?,
 
         _ =>
             None,

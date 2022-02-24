@@ -20,11 +20,13 @@ pub enum TokenType
     Break,
     Extern,
     Ref,
+    Deref,
     Of,
     New,
 
     Int,
     Char,
+    Bool,
     Any,
 
     OpenBracket,
@@ -47,6 +49,7 @@ pub enum TokenType
     IntLiteral,
     StringLiteral,
     CharLiteral,
+    BoolLiteral,
     Identifier,
 
     Error,
@@ -70,11 +73,13 @@ impl fmt::Display for TokenType
             Self::Break => write!(f, "break"),
             Self::Extern => write!(f, "extern"),
             Self::Ref => write!(f, "ref"),
+            Self::Deref => write!(f, "deref"),
             Self::Of => write!(f, "of"),
             Self::New => write!(f, "new"),
 
             Self::Int => write!(f, "int"),
             Self::Char => write!(f, "char"),
+            Self::Bool => write!(f, "bool"),
             Self::Any => write!(f, "any"),
 
             Self::OpenBracket => write!(f, "("),
@@ -97,6 +102,7 @@ impl fmt::Display for TokenType
             Self::IntLiteral => write!(f, "Int Literal"),
             Self::StringLiteral => write!(f, "String Literal"),
             Self::CharLiteral => write!(f, "Char Literal"),
+            Self::BoolLiteral => write!(f, "Bool Literal"),
             Self::Identifier => write!(f, "Identifier"),
 
             Self::Error => write!(f, "Error"),
@@ -305,16 +311,24 @@ fn parse_identifier(text: &str) -> TokenType
         TokenType::Extern
     } else if text == "ref" {
         TokenType::Ref
+    } else if text == "deref" {
+        TokenType::Deref
     } else if text == "int" {
         TokenType::Int
     } else if text == "char" {
         TokenType::Char
+    } else if text == "bool" {
+        TokenType::Bool
     } else if text == "any" {
         TokenType::Any
     } else if text == "of" {
         TokenType::Of
     } else if text == "new" {
         TokenType::New
+    } else if text == "true" {
+        TokenType::BoolLiteral
+    } else if text == "false" {
+        TokenType::BoolLiteral
     } else {
         TokenType::Identifier
     }

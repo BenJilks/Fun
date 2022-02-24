@@ -1,4 +1,4 @@
-use super::TokenStream;
+use super::{TokenStream, parse_type_variable};
 use super::statement::parse_block;
 use super::data_type::{parse_data_type, parse_data_type_description};
 use crate::tokenizer::{Token, TokenType};
@@ -67,12 +67,14 @@ pub fn parse_function(tokens: &mut Peekable<impl Iterator<Item = Token>>)
     let name = tokens.expect(TokenType::Identifier)?;
     let params = parse_function_params(tokens)?;
     let return_type = parse_function_return_type(tokens)?;
+    let type_variable = parse_type_variable(tokens)?;
     let body = parse_function_body(tokens)?;
 
     Ok(Function
     {
         name,
         params,
+        type_variable,
         return_type,
         body,
     })

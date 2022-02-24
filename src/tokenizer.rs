@@ -20,10 +20,12 @@ pub enum TokenType
     Break,
     Extern,
     Ref,
-    Int,
-    Char,
     Of,
     New,
+
+    Int,
+    Char,
+    Any,
 
     OpenBracket,
     CloseBracket,
@@ -68,10 +70,12 @@ impl fmt::Display for TokenType
             Self::Break => write!(f, "break"),
             Self::Extern => write!(f, "extern"),
             Self::Ref => write!(f, "ref"),
-            Self::Int => write!(f, "int"),
-            Self::Char => write!(f, "char"),
             Self::Of => write!(f, "of"),
             Self::New => write!(f, "new"),
+
+            Self::Int => write!(f, "int"),
+            Self::Char => write!(f, "char"),
+            Self::Any => write!(f, "any"),
 
             Self::OpenBracket => write!(f, "("),
             Self::CloseBracket => write!(f, ")"),
@@ -305,6 +309,8 @@ fn parse_identifier(text: &str) -> TokenType
         TokenType::Int
     } else if text == "char" {
         TokenType::Char
+    } else if text == "any" {
+        TokenType::Any
     } else if text == "of" {
         TokenType::Of
     } else if text == "new" {

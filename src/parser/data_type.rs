@@ -1,6 +1,6 @@
 use super::TokenStream;
 use crate::tokenizer::{Token, TokenType};
-use crate::data_type::DataType;
+use crate::data_type::{DataType, DataTypeDescription};
 use std::iter::Peekable;
 use std::error::Error;
 
@@ -41,5 +41,20 @@ pub fn parse_data_type(tokens: &mut Peekable<impl Iterator<Item = Token>>)
     }
 
     Ok(data_type)
+}
+
+pub fn parse_data_type_description(tokens: &mut Peekable<impl Iterator<Item = Token>>)
+    -> Result<DataTypeDescription, Box<dyn Error>>
+{
+    let next = tokens.peek();
+    if next.is_none() {
+        panic!();
+    }
+
+    match next.unwrap().token_type()
+    {
+        TokenType::Any => { tokens.next(); Ok(DataTypeDescription::Any) },
+        _ => Ok(DataTypeDescription::Exact(parse_data_type(tokens)?)),
+    }
 }
 

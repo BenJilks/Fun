@@ -2,12 +2,14 @@ mod tokenizer;
 mod data_type;
 mod ast;
 mod parser;
+mod intermediate;
 mod compiler;
 mod optimizer;
+mod code_generator;
 use parser::parse;
 use compiler::compile;
 use optimizer::optimize;
-use compiler::x86::X86CodeGenorator;
+use code_generator::x86;
 use std::env;
 use std::process::exit;
 use std::error::Error;
@@ -32,10 +34,25 @@ fn main()
     let mut ast = ast_or_error.unwrap();
     optimize(&mut ast);
 
-    let mut gen = X86CodeGenorator::new(std::io::stdout())?;
-    match compile(&mut gen, ast)
+    match compile(ast)
     {
-        Ok(_) => {},
+        Ok(program) =>
+        {
+            if false
+            {
+                for function in &program.functions
+                {
+                    println!("{}:", function.name);
+                    for instruction in &function.code {
+                        println!("    {}", instruction);
+                    }
+                    println!();
+                }
+            }
+
+            x86::generate(program, &mut std::io::stdout())?;
+        },
+
         Err(err) =>
         {
             eprintln!("Error: {}", err);

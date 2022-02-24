@@ -1,6 +1,6 @@
 use super::TokenStream;
 use super::statement::parse_block;
-use super::data_type::parse_data_type;
+use super::data_type::{parse_data_type, parse_data_type_description};
 use crate::tokenizer::{Token, TokenType};
 use crate::ast::{Function, Param, Statement};
 use crate::data_type::DataType;
@@ -21,12 +21,12 @@ fn parse_function_params(tokens: &mut Peekable<impl Iterator<Item = Token>>)
 
         let name = tokens.expect(TokenType::Identifier)?;
         tokens.expect(TokenType::Colon)?;
-        let data_type = parse_data_type(tokens)?;
+        let data_type_description = parse_data_type_description(tokens)?;
 
         params.push(Param
         {
             name,
-            data_type,
+            data_type_description,
         });
 
         if !tokens.is_next(TokenType::Comma) {

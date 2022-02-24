@@ -1,20 +1,22 @@
 use super::name_table::Scope;
+use super::function::find_function_for_call;
 use super::error::CompilerError;
 use crate::tokenizer::Token;
 use crate::ast::{Function, Expression};
 use crate::ast::{Call, Operation, OperationType};
 use crate::data_type::DataType;
+use std::error::Error;
 
-fn derive_access_type<Value>(name_table: &mut Scope<Value>,
-                             lhs_type: DataType,
-                             field_name_token: &Token)
-    -> Result<DataType, Box<CompilerError>>
+fn derive_access_type(name_table: &mut Scope,
+                      lhs_type: DataType,
+                      field_name_token: &Token)
+    -> Result<DataType, Box<dyn Error>>
 {
     match lhs_type
     {
         DataType::Struct(struct_name) =>
         {
-            let struct_or_none = name_table.structs().lookup(&struct_name);
+            let struct_or_none = name_table.lookup_struct(&struct_name);
             if struct_or_none.is_none()
             {
                 return Err(CompilerError::new_no_position(format!(
@@ -23,7 +25,7 @@ fn derive_access_type<Value>(name_table: &mut Scope<Value>,
 
             let struct_ = struct_or_none.unwrap();
             let field_name = field_name_token.content();
-            let field_or_none = struct_.lookup(field_name);
+            let field_or_none = struct_.get(field_name);
             if field_or_none.is_none()
             {
                 return Err(CompilerError::new_no_position(format!(
@@ -32,12 +34,12 @@ fn derive_access_type<Value>(name_table: &mut Scope<Value>,
             }
 
             let (_, data_type) = field_or_none.unwrap();
-            Ok(data_type)
+            Ok(data_type.clone())
         },
 
         DataType::Generic(argument, struct_name) =>
         {
-            let struct_or_none = name_table.typed_structs().lookup(&struct_name);
+            let struct_or_none = name_table.lookup_typed_struct(&struct_name);
             if struct_or_none.is_none()
             {
                 return Err(CompilerError::new_no_position(format!(
@@ -72,9 +74,9 @@ fn derive_access_type<Value>(name_table: &mut Scope<Value>,
     }
 }
 
-fn derive_operation_type<Value>(name_table: &mut Scope<Value>,
-                                operation: &Operation)
-    -> Result<DataType, Box<CompilerError>>
+fn derive_operation_type(name_table: &mut Scope,
+                         operation: &Operation)
+    -> Result<DataType, Box<dyn Error>>
 {
     let lhs_type = derive_data_type(name_table, &operation.lhs)?;
     match operation.operation_type
@@ -111,10 +113,10 @@ fn derive_operation_type<Value>(name_table: &mut Scope<Value>,
     }
 }
 
-pub fn call_signature<Value>(scope: &mut Scope<Value>,
-                         function_name: &str,
-                         call: &Call)
-    -> Result<String, Box<CompilerError>>
+pub fn call_signature(scope: &mut Scope,
+                      function_name: &str,
+                      call: &Call)
+    -> Result<String, Box<dyn Error>>
 {
     let mut signature = function_name.to_owned();
     for argument in &call.arguments
@@ -126,20 +128,15 @@ pub fn call_signature<Value>(scope: &mut Scope<Value>,
     Ok(signature)
 }
 
-fn derive_call_type<Value>(scope: &mut Scope<Value>, call: &Call)
-    -> Result<DataType, Box<CompilerError>>
+fn derive_call_type(scope: &mut Scope, call: &Call)
+    -> Result<DataType, Box<dyn Error>>
 {
     match call.callable.as_ref()
     {
         Expression::Identifier(name) =>
         {
-            let signature = call_signature(scope, name.content(), call)?;
-            let function_or_none = scope.functions().lookup(&signature);
-            assert!(function_or_none.is_some());
-
-            let function = function_or_none.unwrap();
+            let (_, function) = find_function_for_call(scope, name, call)?;
             assert!(function.return_type.is_some());
-
             Ok(function.return_type.unwrap())
         },
 
@@ -147,9 +144,9 @@ fn derive_call_type<Value>(scope: &mut Scope<Value>, call: &Call)
     }
 }
 
-pub fn derive_data_type<Value>(scope: &mut Scope<Value>,
-                               expression: &Expression)
-    -> Result<DataType, Box<CompilerError>>
+pub fn derive_data_type(scope: &mut Scope,
+                        expression: &Expression)
+    -> Result<DataType, Box<dyn Error>>
 {
     match expression
     {
@@ -166,7 +163,7 @@ pub fn derive_data_type<Value>(scope: &mut Scope<Value>,
 
         Expression::Identifier(name) =>
         {
-            match scope.values().lookup(name.content())
+            match scope.lookup_value(name.content())
             {
                 Some((_, data_type)) => Ok(data_type),
                 None => 
@@ -190,10 +187,10 @@ pub fn derive_data_type<Value>(scope: &mut Scope<Value>,
     }
 }
 
-fn size_of_struct<Value>(scope: &mut Scope<Value>, name: &str)
+fn size_of_struct(scope: &Scope, name: &str)
     -> Result<usize, Box<CompilerError>>
 {
-    let struct_of_none = scope.structs().lookup(name);
+    let struct_of_none = scope.lookup_struct(name);
     if struct_of_none.is_none()
     {
         return Err(CompilerError::new_no_position(format!(
@@ -202,19 +199,19 @@ fn size_of_struct<Value>(scope: &mut Scope<Value>, name: &str)
 
     let struct_ = struct_of_none.unwrap();
     let mut total_size = 0;
-    for (_, (_, data_type)) in struct_.values() {
-        total_size += size_of(scope, data_type)?;
+    for (_, (_, data_type)) in struct_ {
+        total_size += size_of(scope, &data_type)?;
     }
 
     Ok(total_size)
 }
 
-fn size_of_typed_struct<Value>(scope: &mut Scope<Value>,
-                               name: &str,
-                               argument_type: &DataType)
+fn size_of_typed_struct(scope: &Scope,
+                        name: &str,
+                        argument_type: &DataType)
     -> Result<usize, Box<CompilerError>>
 {
-    let typed_struct_of_none = scope.typed_structs().lookup(name);
+    let typed_struct_of_none = scope.lookup_typed_struct(name);
     if typed_struct_of_none.is_none()
     {
         return Err(CompilerError::new_no_position(format!(
@@ -241,7 +238,7 @@ fn size_of_typed_struct<Value>(scope: &mut Scope<Value>,
     Ok(total_size)
 }
 
-pub fn size_of<Value>(scope: &mut Scope<Value>, data_type: &DataType)
+pub fn size_of(scope: &Scope, data_type: &DataType)
     -> Result<usize, Box<CompilerError>>
 {
     Ok(match data_type
@@ -285,12 +282,12 @@ fn data_type_signature(data_type: &DataType)
     }
 }
 
-pub fn function_signature(function: &Function)
+pub fn function_signature(function: &Function, params: &Vec<DataType>)
     -> String
 {
     let mut signature = function.name.content().to_owned();
-    for param in &function.params {
-        signature += &data_type_signature(&param.data_type);
+    for param in params {
+        signature += &data_type_signature(param);
     }
 
     signature

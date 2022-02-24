@@ -1,91 +1,22 @@
-pub mod x86;
-mod code_genorator;
+mod intermediate;
 mod name_table;
 mod data_type;
 mod error;
+mod function;
 mod expression;
 mod statement;
-use code_genorator::CodeGenortator;
-use name_table::{NameTable, Scope, FunctionType, TypedStructType};
-use data_type::{size_of, function_signature};
-use statement::compile_statement;
+use intermediate::IRGenorator;
+use name_table::{Scope, CompiledFunction, FunctionDescriptionType, TypedStructType};
+use data_type::size_of;
+use function::compile_function;
 use crate::ast::SourceFile;
-use crate::ast::{Function, Struct, Statement};
-use std::rc::Rc;
+use crate::ast::{Function, Struct};
+use crate::intermediate::IRProgram;
+use std::collections::{HashMap, HashSet};
 use std::error::Error;
 
-fn compile_params<Gen, Value>(gen: &mut Gen, scope: &mut Scope<Value>,
-                              function: &Function)
-        -> Result<Option<Rc<Value>>, Box<dyn Error>>
-    where Gen: CodeGenortator<Value>
-{
-    let mut param_sizes = function.params
-        .iter()
-        .map(|param| size_of(scope, &param.data_type))
-        .collect::<Result<Vec<_>, _>>()?;
-
-    let return_size = match &function.return_type
-    {
-        Some(return_type) => size_of(scope, return_type)?,
-        None => 0,
-    };
-
-    let is_big_return = return_size > 4;
-    if is_big_return {
-        param_sizes.push(return_size);
-    }
-
-    let signature = function_signature(function);
-    let mut params = gen.start_function(&signature, param_sizes.into_iter())?;
-    let return_to = if is_big_return { params.pop() } else { None };
-
-    let param_and_names = params.into_iter().zip(&function.params);
-    for (value, param) in param_and_names
-    {
-        // TODO: Handle duplicate name error here
-        let name = param.name.content();
-        let data_type = param.data_type.clone();
-        assert!(scope.values().put(name, (value, data_type)));
-    }
-
-    Ok(return_to)
-}
-
-fn compile_function<Gen, Value>(gen: &mut Gen, scope: Scope<Value>, function: &Function)
-        -> Result<(), Box<dyn Error>>
-    where Gen: CodeGenortator<Value>
-{
-    if function.body.is_none() {
-        return Ok(());
-    }
-
-    let mut local_scope = Scope::<Value>::new(Some(Box::from(scope)));
-    let return_to = compile_params(gen, &mut local_scope, function)?;
-    let return_type = function.return_type.as_ref();
-
-    let mut did_return = false;
-    for statement in function.body.as_ref().unwrap()
-    {
-        match &statement
-        {
-            Statement::Return(_) => did_return = true,
-            _ => {},
-        }
-
-        compile_statement(gen, &mut local_scope,
-            statement, return_type, return_to.clone(), None)?;
-    }
-
-    if !did_return
-    {
-        let zero = gen.emit_int(0)?;
-        gen.ret(zero, 4, None)?;
-    }
-    Ok(())
-}
-
-fn register_typed_struct<Value>(scope: &mut Scope<Value>,
-                                struct_: &Struct)
+fn register_typed_struct(scope: &mut Scope,
+                         struct_: &Struct)
     -> Result<(), Box<dyn Error>>
 {
     let mut fields = Vec::new();
@@ -98,7 +29,7 @@ fn register_typed_struct<Value>(scope: &mut Scope<Value>,
 
     let variable_token = struct_.type_variable.clone().unwrap();
     let name = struct_.name.content();
-    scope.typed_structs().put(name, TypedStructType
+    scope.put_typed_struct(name.to_owned(), TypedStructType
     {
         variable: variable_token.content().to_owned(),
         fields,
@@ -106,17 +37,16 @@ fn register_typed_struct<Value>(scope: &mut Scope<Value>,
     Ok(())
 }
 
-fn register_struct<Gen, Value>(gen: &mut Gen, scope: &mut Scope<Value>,
+fn register_struct(gen: &mut IRGenorator, scope: &mut Scope,
                                struct_: &Struct)
         -> Result<(), Box<dyn Error>>
-    where Gen: CodeGenortator<Value>
 {
     if struct_.type_variable.is_some() {
         return register_typed_struct(scope, struct_);
     }
 
     let mut last_offset = 0;
-    let mut struct_layout = NameTable::new(None);
+    let mut struct_layout = HashMap::new();
     for field in &struct_.fields
     {
         let name = field.name.content();
@@ -125,68 +55,87 @@ fn register_struct<Gen, Value>(gen: &mut Gen, scope: &mut Scope<Value>,
 
         let value = gen.emit_struct_offset(last_offset, size);
         last_offset += size as i32;
-        struct_layout.put(name, (value, data_type));
+        struct_layout.insert(name.to_owned(), (value, data_type));
     }
 
     let name = struct_.name.content();
-    scope.structs().put(name, struct_layout);
+    scope.put_struct(name.to_owned(), struct_layout);
     Ok(())
 }
 
-fn register_function<Value>(scope: &mut Scope<Value>,
+fn register_function(scope: &mut Scope,
                             function: &Function)
     -> Result<(), Box<dyn Error>>
 {
     let return_type = function.return_type.clone();
     let params = function.params
         .iter()
-        .map(|param| param.data_type.clone())
+        .map(|param| param.data_type_description.clone())
         .collect::<Vec<_>>();
 
-    let signature = function_signature(function);
-    scope.functions().put(&signature, FunctionType
+    let name = function.name.content();
+    scope.put_function_description(name.to_owned(), FunctionDescriptionType
     {
-        is_extern: false,
         params,
         return_type,
     });
     Ok(())
 }
 
-fn register_extern<Value>(scope: &mut Scope<Value>,
-                          name: &str)
+fn register_extern(scope: &mut Scope,
+                          name: String)
     -> Result<(), Box<dyn Error>>
 {
-    scope.functions().put(name, FunctionType
-    {
-        is_extern: true,
-        params: Vec::new(),
-        return_type: None,
-    });
+    scope.put_extern(name);
     Ok(())
 }
 
-pub fn compile<Gen, Value>(gen: &mut Gen, ast: SourceFile)
-        -> Result<(), Box<dyn Error>>
-    where Gen: CodeGenortator<Value>
+pub fn compile(ast: SourceFile)
+    -> Result<IRProgram, Box<dyn Error>>
 {
-    let mut scope = Scope::<Value>::new(None);
-    for struct_ in &ast.structs {
-        register_struct(gen, &mut scope, struct_)?;
-    }
+    let mut scope = Scope::new(None);
     for function in &ast.functions {
         register_function(&mut scope, function)?;
     }
     for extern_ in &ast.externs {
-        register_extern(&mut scope, extern_.content())?;
+        register_extern(&mut scope, extern_.content().to_owned())?;
+    }
+
+    let mut compiled_functions = HashSet::<CompiledFunction>::new();
+    let mut functions_to_compile = Vec::<CompiledFunction>::new();
+    functions_to_compile.push(CompiledFunction
+    {
+        name: "main".to_owned(),
+        params: Vec::new(),
+        return_type: None,
+    });
+
+    let mut gen = IRGenorator::new();
+    for struct_ in &ast.structs {
+        register_struct(&mut gen, &mut scope, struct_)?;
+    }
+
+    while functions_to_compile.len() > 0
+    {
+        let function_data = functions_to_compile.pop().unwrap();
+        let function = ast.find_function(&function_data.name);
+        let functions_used = compile_function(&mut gen,
+            &mut scope, function.unwrap(), function_data.params)?;
+
+        for function in functions_used
+        {
+            if compiled_functions.contains(&function) {
+                continue;
+            }
+            compiled_functions.insert(function.clone());
+            functions_to_compile.push(function);
+        }
     }
 
     for extern_ in &ast.externs {
         gen.emit_extern(extern_.content());
     }
-    for function in &ast.functions {
-        compile_function(gen, scope.clone(), function)?
-    }
-    Ok(())
+
+    Ok(gen.program())
 }
 

@@ -1,5 +1,5 @@
 use crate::tokenizer::Token;
-use crate::data_type::DataType;
+use crate::data_type::{DataType, DataTypeDescription};
 
 #[derive(Debug)]
 pub struct Field
@@ -96,7 +96,7 @@ pub enum Statement
 pub struct Param
 {
     pub name: Token,
-    pub data_type: DataType,
+    pub data_type_description: DataTypeDescription,
 }
 
 #[derive(Debug)]
@@ -127,6 +127,18 @@ impl Default for SourceFile
             externs: Vec::new(),
         }
     }
+}
+
+impl SourceFile
+{
+
+    pub fn find_function(&self, name: &str) -> Option<&Function>
+    {
+        self.functions
+            .iter()
+            .find(|f| f.name.content() == name)
+    }
+
 }
 
 impl Expression

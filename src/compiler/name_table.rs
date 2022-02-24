@@ -1,19 +1,12 @@
-use crate::data_type::DataType;
-use std::collections::HashMap;
+use super::intermediate::value::IRValue;
+use crate::data_type::{DataType, DataTypeDescription};
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 #[derive(Clone)]
-pub struct NameTable<Item>
+pub struct FunctionDescriptionType
 {
-    parent: Option<Box<NameTable<Item>>>,
-    values: HashMap<String, Item>,
-}
-
-#[derive(Clone)]
-pub struct FunctionType
-{
-    pub is_extern: bool,
-    pub params: Vec<DataType>,
+    pub params: Vec<DataTypeDescription>,
     pub return_type: Option<DataType>,
 }
 
@@ -24,118 +17,116 @@ pub struct TypedStructType
     pub fields: Vec<(String, DataType)>,
 }
 
-pub struct Scope<Value>
+#[derive(PartialEq, Eq, Hash, Clone)]
+pub struct CompiledFunction
 {
-    values: NameTable<(Rc<Value>, DataType)>,
-    structs: NameTable<NameTable<(Rc<Value>, DataType)>>,
-    typed_structs: NameTable<TypedStructType>,
-    functions: NameTable<FunctionType>,
+    pub name: String,
+    pub params: Vec<DataType>,
+    pub return_type: Option<DataType>,
 }
 
-impl<Value> Clone for Scope<Value>
+pub struct Scope<'a>
+{
+    parent: Option<&'a Scope<'a>>,
+    values: HashMap<String, (Rc<IRValue>, DataType)>,
+    structs: HashMap<String, HashMap<String, (Rc<IRValue>, DataType)>>,
+    typed_structs: HashMap<String, TypedStructType>,
+    function_descriptions: HashMap<String, Vec<FunctionDescriptionType>>,
+
+    // FIXME: This is hacky, externs should be no different from a 
+    //        normal, compiled function.
+    externs: HashMap<String, ()>,
+
+    used_functions: HashSet<CompiledFunction>,
+}
+
+impl<'a> Scope<'a>
 {
 
-    fn clone(&self) -> Self
+    pub fn new(parent: Option<&'a Scope>) -> Self
     {
         Self
         {
-            values: self.values.clone(),
-            structs: self.structs.clone(),
-            typed_structs: self.typed_structs.clone(),
-            functions: self.functions.clone(),
+            parent,
+            values: Default::default(),
+            structs: Default::default(),
+            typed_structs: Default::default(),
+            function_descriptions: Default::default(),
+
+            externs: Default::default(),
+            used_functions: HashSet::default(),
         }
     }
 
-}
-
-impl<Item> NameTable<Item>
-    where Item: Clone
-{
-
-    pub fn new(parent: Option<Box<NameTable<Item>>>) -> Self
+    pub fn put_used_function(&mut self, function: CompiledFunction)
     {
-        Self
+        self.used_functions.insert(function);
+    }
+    pub fn used_functions(&self) -> HashSet<CompiledFunction>
+    {
+        self.used_functions.clone()
+    }
+
+    pub fn put_value(&mut self, name: String, value: Rc<IRValue>, data_type: DataType) -> bool
+    {
+        self.values.insert(name, (value, data_type)).is_none()
+    }
+    pub fn put_struct(&mut self, name: String, value: HashMap<String, (Rc<IRValue>, DataType)>) -> bool
+    {
+        self.structs.insert(name, value).is_none()
+    }
+    pub fn put_typed_struct(&mut self, name: String, value: TypedStructType) -> bool
+    {
+        self.typed_structs.insert(name, value).is_none()
+    }
+    pub fn put_function_description(&mut self, name: String, value: FunctionDescriptionType)
+    {
+        match self.function_descriptions.get_mut(&name)
         {
-            parent: parent,
-            values: HashMap::new(),
+            Some(descriptions) => descriptions.push(value),
+            None => { self.function_descriptions.insert(name, vec![value]); },
         }
     }
-
-    pub fn values(&self) -> impl Iterator<Item = (&String, &Item)>
+    pub fn put_extern(&mut self, name: String) -> bool
     {
-        self.values.iter()
+        self.externs.insert(name, ()).is_none()
     }
 
-    pub fn put(&mut self, name: &str, value: Item) -> bool
+    fn lookup<T, F>(&self, name: &str, get: F) -> Option<T>
+        where F: Fn(&Self, &str) -> Option<T>, T: Clone
     {
-        match self.values.insert(name.to_owned(), value)
-        {
-            None => true,
-            Some(_) => false,
-        }
-    }
-
-    pub fn lookup(&self, name: &str) -> Option<Item>
-    {
-        let value = self.values.get(name);
+        let value = get(self, name);
         if value.is_some() {
-            return Some(value.unwrap().clone());
+            return value;
         }
 
-        match &self.parent
+        match self.parent
         {
-            Some(parent) => parent.lookup(name),
+            Some(parent) => parent.lookup(name, get),
             None => None,
         }
     }
 
-}
-
-impl<Value> Scope<Value>
-{
-
-    pub fn new(parent: Option<Box<Scope<Value>>>) -> Self
+    pub fn lookup_value(&self, name: &str) -> Option<(Rc<IRValue>, DataType)>
     {
-        match parent
-        {
-            Some(parent) =>
-                Self
-                {
-                    values: NameTable::new(Some(Box::from(parent.values))),
-                    structs: NameTable::new(Some(Box::from(parent.structs))),
-                    typed_structs: NameTable::new(Some(Box::from(parent.typed_structs))),
-                    functions: NameTable::new(Some(Box::from(parent.functions))),
-                },
-            
-            None =>
-                Self
-                {
-                    values: NameTable::new(None),
-                    structs: NameTable::new(None),
-                    typed_structs: NameTable::new(None),
-                    functions: NameTable::new(None),
-                },
-        }
+        self.lookup(name, |s, n| s.values.get(n).cloned())
     }
-
-    pub fn values(&mut self) -> &mut NameTable<(Rc<Value>, DataType)>
+    pub fn lookup_struct(&self, name: &str) -> Option<HashMap<String, (Rc<IRValue>, DataType)>>
     {
-        &mut self.values
+        self.lookup(name, |s, n| s.structs.get(n).cloned())
     }
-
-    pub fn structs(&mut self) -> &mut NameTable<NameTable<(Rc<Value>, DataType)>>
+    pub fn lookup_typed_struct(&self, name: &str) -> Option<TypedStructType>
     {
-        &mut self.structs
+        self.lookup(name, |s, n| s.typed_structs.get(n).cloned())
     }
-
-    pub fn typed_structs(&mut self) -> &mut NameTable<TypedStructType>
+    pub fn lookup_function_descriptions(&self, name: &str) -> Vec<FunctionDescriptionType>
     {
-        &mut self.typed_structs
+        self.lookup(name, |s, n| s.function_descriptions.get(n).cloned())
+            .unwrap_or(Vec::new())
     }
-
-    pub fn functions(&mut self) -> &mut NameTable<FunctionType>
+    pub fn lookup_extern(&self, name: &str) -> Option<()>
     {
-        &mut self.functions
+        self.lookup(name, |s, n| s.externs.get(n).cloned())
     }
 
 }

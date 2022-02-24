@@ -132,11 +132,29 @@ impl Default for SourceFile
 impl SourceFile
 {
 
-    pub fn find_function(&self, name: &str) -> Option<&Function>
+    pub fn find_function(&self,
+                         name: &str,
+                         params: &Vec<DataTypeDescription>)
+        -> Option<&Function>
     {
         self.functions
             .iter()
-            .find(|f| f.name.content() == name)
+            .find(|f|
+        {
+            if f.name.content() != name {
+                return false;
+            }
+            if f.params.len() != params.len() {
+                return false;
+            }
+            for (param, expected) in f.params.iter().zip(params)
+            {
+                if &param.data_type_description != expected {
+                    return false;
+                }
+            }
+            true
+        })
     }
 
 }

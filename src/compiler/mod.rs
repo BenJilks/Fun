@@ -106,6 +106,12 @@ pub fn compile(ast: SourceFile)
     functions_to_compile.push(CompiledFunction
     {
         name: "main".to_owned(),
+        description: FunctionDescriptionType
+        {
+            params: Vec::new(),
+            return_type: None,
+        },
+
         params: Vec::new(),
         return_type: None,
     });
@@ -118,7 +124,7 @@ pub fn compile(ast: SourceFile)
     while functions_to_compile.len() > 0
     {
         let function_data = functions_to_compile.pop().unwrap();
-        let function = ast.find_function(&function_data.name);
+        let function = ast.find_function(&function_data.name, &function_data.description.params);
         let functions_used = compile_function(&mut gen,
             &mut scope, function.unwrap(), function_data.params)?;
 

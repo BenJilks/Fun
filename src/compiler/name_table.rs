@@ -3,7 +3,7 @@ use crate::data_type::{DataType, DataTypeDescription};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
-#[derive(Clone)]
+#[derive(PartialEq, Eq, Hash, Clone, Debug)]
 pub struct FunctionDescriptionType
 {
     pub params: Vec<DataTypeDescription>,
@@ -21,6 +21,7 @@ pub struct TypedStructType
 pub struct CompiledFunction
 {
     pub name: String,
+    pub description: FunctionDescriptionType,
     pub params: Vec<DataType>,
     pub return_type: Option<DataType>,
 }

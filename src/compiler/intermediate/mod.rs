@@ -377,7 +377,9 @@ impl IRGenorator
                return_size: usize) -> Result<Rc<IRValue>, Box<dyn Error>>
         where F: FnMut(&mut Self, usize) -> Result<(Rc<IRValue>, usize), Box<dyn Error>>
     {
-        let return_storage = self.allocate(return_size);
+        let big_return_storage = 
+            if return_size > 4 { Some(self.allocate(return_size)) }
+            else { None };
 
         let mut total_argument_size = 0;
         for i in (0..argument_count).rev()
@@ -387,6 +389,7 @@ impl IRGenorator
             total_argument_size += size;
         }
 
+        let return_storage = big_return_storage.unwrap_or_else(|| self.allocate(return_size));
         self.emit_ir(IR::Call(
             function_name.to_owned(), return_storage.clone(), return_size));
 

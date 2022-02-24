@@ -29,6 +29,7 @@ fn function_from_description(scope: &mut Scope,
     let function = CompiledFunction
     {
         name: function_name.to_owned(),
+        description: description,
         params,
         return_type,
     };
@@ -79,6 +80,11 @@ pub fn find_function_for_call(scope: &mut Scope,
     Ok((function_name.to_owned(), CompiledFunction
     {
         name: function_name.to_owned(),
+        description: FunctionDescriptionType
+        {
+            params: Vec::new(),
+            return_type: None,
+        },
         params: Vec::new(),
         return_type: None,
     }))

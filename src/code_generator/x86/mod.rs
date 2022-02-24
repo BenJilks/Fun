@@ -150,6 +150,9 @@ impl<W> X86Output<W>
         -> Result<(), Box<dyn Error>>
     {
         let from_value = self.value_of(size, from);
+        let scratch_register = self.allocator.allocate_scratch_register(size);
+        self.emit(format!("mov {}, {}", scratch_register, from_value))?;
+
         match to
         {
             IRStorage::Register(register) =>
@@ -158,24 +161,25 @@ impl<W> X86Output<W>
                 let stack_offset = self.allocator.stack_offset(*register);
                 self.emit(format!("mov {}, {}",
                     X86Register::esp().offset(size, stack_offset as i32 + offset as i32),
-                    from_value))?;
+                    scratch_register))?;
             },
 
             IRStorage::Param(param_offset) =>
             {
                 self.emit(format!("mov {}, {}",
                     X86Register::ebp().offset(size, *param_offset as i32 + 8 + offset as i32),
-                    from_value))?;
+                    scratch_register))?;
             },
 
             IRStorage::Local(local_offset) =>
             {
                 self.emit(format!("mov {}, {}",
                     X86Register::ebp().offset(size, -(*local_offset as i32) + offset as i32),
-                    from_value))?;
+                    scratch_register))?;
             },
         }
 
+        self.allocator.free_scratch_register(scratch_register);
         Ok(())
     }
 
@@ -273,20 +277,13 @@ impl<W> X86Output<W>
         -> Result<(), Box<dyn Error>>
     {
         let is_eax = self.is_eax(return_value);
-        let is_eax_in_use = self.allocator.is_in_use('e');
-        if !is_eax && is_eax_in_use {
-            self.emit(format!("push eax"))?;
-        }
+        let is_eax_in_use = self.allocator.is_in_use('a');
 
         self.emit(format!("call {}", function))?;
-        if !is_eax && is_eax_in_use
+        if !is_eax && is_eax_in_use && size > 0
         {
-            if size > 0
-            {
-                let return_str = self.value_of(size, return_value);
-                self.emit(format!("mov {}, eax", return_str))?;
-            }
-            self.emit(format!("pop eax"))?;
+            let return_str = self.value_of(size, return_value);
+            self.emit(format!("mov {}, eax", return_str))?;
         }
         Ok(())
     }

@@ -12,7 +12,7 @@ pub enum DataType
     Generic(Box<DataType>, String),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(PartialEq, Eq, Hash, Clone, Debug)]
 pub enum DataTypeDescription
 {
     Exact(DataType),

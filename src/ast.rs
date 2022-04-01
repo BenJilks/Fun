@@ -12,7 +12,7 @@ pub struct Field
 pub struct Struct
 {
     pub name: Token,
-    pub type_variable: Option<Token>,
+    pub type_variable: Option<DataType>,
     pub fields: Vec<Field>,
 }
 
@@ -21,10 +21,12 @@ pub enum OperationType
 {
     Add,
     Subtract,
+    Multiply,
     GreaterThan,
     LessThan,
     Ref,
     Deref,
+    Sizeof,
     Indexed,
     Access,
     Assign,
@@ -43,6 +45,7 @@ pub struct Call
 {
     pub callable: Box<Expression>,
     pub arguments: Vec<Expression>,
+    pub type_variable: Option<DataType>,
 }
 
 #[derive(Debug, Clone)]
@@ -57,6 +60,7 @@ pub enum Expression
 {
     Operation(Operation),
     Call(Call),
+    ExternCall(Call),
     InitializerList(InitializerList),
     ArrayLiteral(Vec<Expression>),
     IntLiteral(i32),
@@ -105,7 +109,7 @@ pub struct Function
 {
     pub name: Token,
     pub params: Vec<Param>,
-    pub type_variable: Option<Token>,
+    pub type_variable: Option<DataType>,
     pub return_type: Option<DataType>,
     pub body: Option<Vec<Statement>>,
 }
@@ -136,7 +140,8 @@ impl SourceFile
 
     pub fn find_function(&self,
                          name: &str,
-                         params: &Vec<DataTypeDescription>)
+                         params: &Vec<DataTypeDescription>,
+                         type_variable: &Option<DataType>)
         -> Option<&Function>
     {
         self.functions
@@ -147,6 +152,9 @@ impl SourceFile
                 return false;
             }
             if f.params.len() != params.len() {
+                return false;
+            }
+            if &f.type_variable != type_variable {
                 return false;
             }
             for (param, expected) in f.params.iter().zip(params)
@@ -170,6 +178,7 @@ impl Expression
         {
             Self::Operation(operation) => operation.lhs.token(),
             Self::Call(call) => call.callable.token(),
+            Self::ExternCall(call) => call.callable.token(),
             Self::InitializerList(list) => Some(&list.list.get(0)?.0),
             Self::ArrayLiteral(arr) => arr.get(0)?.token(),
             Self::IntLiteral(_) => None,

@@ -19,7 +19,7 @@ pub enum DataTypeDescription
     Any,
 }
 
-fn data_type_matches(expected: &DataType, data_type: &DataType, type_variable: &Option<String>)
+fn data_type_matches(expected: &DataType, data_type: &DataType, type_variable: &Option<&str>)
     -> (bool, Option<DataType>)
 {
     match expected
@@ -98,7 +98,7 @@ fn data_type_matches(expected: &DataType, data_type: &DataType, type_variable: &
 impl DataTypeDescription
 {
 
-    pub fn matches(&self, data_type: &DataType, type_variable: &Option<String>)
+    pub fn matches(&self, data_type: &DataType, type_variable: &Option<&str>)
         -> (bool, Option<DataType>)
     {
         match self

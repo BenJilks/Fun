@@ -334,7 +334,7 @@ impl IRGenorator
         self.new_value(IRLocation::Storage(result, size))
     }
 
-    pub fn access(&mut self, value: Rc<IRValue>, field: Rc<IRValue>) -> Rc<IRValue>
+    pub fn access(&mut self, ref_value: Rc<IRValue>, field: Rc<IRValue>) -> Rc<IRValue>
     {
         let (field_offset, field_size) = match &field.location
         {
@@ -342,15 +342,11 @@ impl IRGenorator
             _ => panic!(),
         };
 
-        let ref_value = self.allocate(4);
-        self.emit_ir(IR::SetRef(ref_value.clone(), value.storage()));
         self.emit_ir(IR::I32ConstantOperation(IROperation::Add,
-            ref_value.clone(), ref_value.clone(), field_offset as i32));
+            ref_value.storage(), ref_value.storage(), field_offset as i32));
 
         let result = self.allocate(field_size);
-        self.emit_ir(IR::Deref(result.clone(), ref_value.clone(), field_size));
-
-        self.output.borrow_mut().free_location(&IRLocation::Storage(ref_value, 4));
+        self.emit_ir(IR::Deref(result.clone(), ref_value.storage(), field_size));
         self.new_value(IRLocation::Storage(result, field_size))
     }
 

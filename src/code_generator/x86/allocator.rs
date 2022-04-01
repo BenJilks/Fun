@@ -36,7 +36,7 @@ impl Allocator
         self.registers_in_use.contains(&letter)
     }
 
-    pub fn allocation_type(&mut self, register: IRRegister) -> AllocationType
+    pub fn allocation_type(&self, register: IRRegister) -> AllocationType
     {
         if self.ir_to_x86.contains_key(&register) {
             AllocationType::Register
@@ -47,7 +47,7 @@ impl Allocator
         }
     }
 
-    pub fn register_for(&mut self, register: IRRegister) -> X86Register
+    pub fn register_for(&self, register: IRRegister) -> X86Register
     {
         self.ir_to_x86[&register].clone()
     }
@@ -63,7 +63,7 @@ impl Allocator
         for letter in ['a', 'b', 'c', 'd']
         {
             if !self.registers_in_use.contains(&letter) {
-                return Some((X86Register::General(letter, size), letter));
+                return Some((X86Register::General(letter, size, false), letter));
             }
         }
 
@@ -106,7 +106,7 @@ impl Allocator
             let x86_register = self.ir_to_x86.remove(&register).unwrap();
             let size = match x86_register
             {
-                X86Register::General(letter, size) =>
+                X86Register::General(letter, size, _) =>
                 {
                     assert!(self.registers_in_use.remove(&letter));
                     size
@@ -145,7 +145,7 @@ impl Allocator
     {
         match register
         {
-            X86Register::General(letter, _) =>
+            X86Register::General(letter, _, _) =>
                 assert!(self.registers_in_use.remove(&letter)),
             _ => panic!(),
         }

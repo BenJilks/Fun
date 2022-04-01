@@ -1,5 +1,5 @@
-use super::{TokenStream, parse_type_variable};
-use super::data_type::parse_data_type;
+use super::TokenStream;
+use super::data_type::{parse_data_type, parse_type_variable};
 use crate::tokenizer::{Token, TokenType};
 use crate::ast::{Struct, Field};
 use std::iter::Peekable;

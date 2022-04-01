@@ -59,3 +59,14 @@ pub fn parse_data_type_description(tokens: &mut Peekable<impl Iterator<Item = To
     }
 }
 
+pub fn parse_type_variable(tokens: &mut Peekable<impl Iterator<Item = Token>>)
+    -> Result<Option<DataType>, Box<dyn Error>>
+{
+    if !tokens.is_next(TokenType::Of) {
+        return Ok(None);
+    }
+
+    tokens.expect(TokenType::Of)?;
+    Ok(Some(parse_data_type(tokens)?))
+}
+

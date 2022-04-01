@@ -100,6 +100,15 @@ fn compile_subtract(gen: &mut IRGenorator, scope: &mut Scope,
     Ok(gen.subtract(lhs_value, rhs_value))
 }
 
+fn compile_multiply(gen: &mut IRGenorator, scope: &mut Scope,
+                    lhs: &Expression, rhs: &Expression)
+    -> Result<Rc<IRValue>, Box<dyn Error>>
+{
+    let lhs_value = compile_expression(gen, scope, lhs)?;
+    let rhs_value = compile_expression(gen, scope, rhs)?;
+    Ok(gen.mul(lhs_value, rhs_value))
+}
+
 fn compile_greater_than(gen: &mut IRGenorator, scope: &mut Scope,
                         lhs: &Expression, rhs: &Expression)
     -> Result<Rc<IRValue>, Box<dyn Error>>
@@ -145,70 +154,91 @@ fn layout_for_typed_struct(gen: &mut IRGenorator,
     Ok(layout)
 }
 
+fn field_of(gen: &mut IRGenorator, scope: &mut Scope,
+            struct_type: &DataType, field_name_token: &Token)
+    -> Result<Rc<IRValue>, Box<dyn Error>>
+{
+    match struct_type
+    {
+        DataType::Struct(struct_name) =>
+        {
+            // FIXME: We have duplicate code for this in data_type.rs
+            let struct_or_none = scope.lookup_struct(&struct_name);
+            if struct_or_none.is_none()
+            {
+                return Err(CompilerError::new(field_name_token, format!(
+                    "Could not find struct '{}'", struct_name)));
+            }
+
+            let struct_ = struct_or_none.unwrap();
+            let field_name = field_name_token.content();
+            let field_or_none = struct_.get(field_name);
+            if field_or_none.is_none()
+            {
+                return Err(CompilerError::new(field_name_token, format!(
+                    "Could not find field '{}' in struct '{}'",
+                    field_name, struct_name)));
+            }
+
+            let (field, _) = field_or_none.unwrap();
+            Ok(field.clone())
+        },
+
+        DataType::Generic(argument, struct_name) =>
+        {
+            // FIXME: We have duplicate code for this in data_type.rs
+            let struct_or_none = scope.lookup_typed_struct(&struct_name);
+            if struct_or_none.is_none()
+            {
+                return Err(CompilerError::new(field_name_token, format!(
+                    "Could not find struct '{}'", struct_name)));
+            }
+
+            let typed_struct = struct_or_none.unwrap();
+            let layout = layout_for_typed_struct(gen, scope, &*argument, typed_struct)?;
+
+            let field_name = field_name_token.content();
+            let field_or_none = layout.get(field_name);
+            if field_or_none.is_none()
+            {
+                return Err(CompilerError::new(field_name_token, format!(
+                    "Could not find field '{}' in struct '{}'",
+                    field_name, struct_name)));
+            }
+
+            let (field, _) = field_or_none.unwrap();
+            Ok(field.clone())
+        },
+
+        _ => panic!(),
+    }
+}
+
 fn compile_access(gen: &mut IRGenorator, scope: &mut Scope,
                   lhs: &Expression, rhs: &Expression)
     -> Result<Rc<IRValue>, Box<dyn Error>>
 {
+    let field_name = match rhs
+    {
+        Expression::Identifier(field_name) => field_name,
+        _ => panic!(),
+    };
+
     let lhs_data_type = derive_data_type(scope, lhs)?;
     let lhs_value = compile_expression(gen, scope, lhs)?;
-    match rhs
+    match lhs_data_type
     {
-        Expression::Identifier(name) =>
+        DataType::Struct(_) | DataType::Generic(_, _) =>
         {
-            match lhs_data_type
-            {
-                DataType::Struct(struct_name) =>
-                {
-                    // FIXME: We have duplicate code for this in data_type.rs
-                    let struct_or_none = scope.lookup_struct(&struct_name);
-                    if struct_or_none.is_none()
-                    {
-                        return Err(CompilerError::new(name, format!(
-                            "Could not find struct '{}'", struct_name)));
-                    }
+            let field = field_of(gen, scope, &lhs_data_type, field_name)?;
+            let lhs_ref = gen.ref_of(lhs_value);
+            Ok(gen.access(lhs_ref, field))
+        },
 
-                    let struct_ = struct_or_none.unwrap();
-                    let field_name = name.content();
-                    let field_or_none = struct_.get(field_name);
-                    if field_or_none.is_none()
-                    {
-                        return Err(CompilerError::new(name, format!(
-                            "Could not find field '{}' in struct '{}'",
-                            field_name, struct_name)));
-                    }
-
-                    let (field, _) = field_or_none.unwrap();
-                    Ok(gen.access(lhs_value, field.clone()))
-                },
-
-                DataType::Generic(argument, struct_name) =>
-                {
-                    // FIXME: We have duplicate code for this in data_type.rs
-                    let struct_or_none = scope.lookup_typed_struct(&struct_name);
-                    if struct_or_none.is_none()
-                    {
-                        return Err(CompilerError::new(name, format!(
-                            "Could not find struct '{}'", struct_name)));
-                    }
-
-                    let typed_struct = struct_or_none.unwrap();
-                    let layout = layout_for_typed_struct(gen, scope, &*argument, typed_struct)?;
-
-                    let field_name = name.content();
-                    let field_or_none = layout.get(field_name);
-                    if field_or_none.is_none()
-                    {
-                        return Err(CompilerError::new(name, format!(
-                            "Could not find field '{}' in struct '{}'",
-                            field_name, struct_name)));
-                    }
-
-                    let (field, _) = field_or_none.unwrap();
-                    Ok(gen.access(lhs_value, field.clone()))
-                },
-
-                _ => panic!(),
-            }
+        DataType::Ref(ref_type) =>
+        {
+            let field = field_of(gen, scope, &*ref_type, field_name)?;
+            Ok(gen.access(lhs_value, field))
         },
 
         _ => panic!(),
@@ -219,16 +249,21 @@ fn compile_indexed(gen: &mut IRGenorator, scope: &mut Scope,
                    lhs: &Expression, rhs: &Expression)
     -> Result<Rc<IRValue>, Box<dyn Error>>
 {
-    let item_type = match derive_data_type(scope, &lhs)?
-    {
-        DataType::Array(item_type, _) => item_type,
-        _ => panic!(),
-    };
-    let item_size = size_of(scope, &item_type)?;
-
     let lhs_value = compile_expression(gen, scope, lhs)?;
     let rhs_value = compile_expression(gen, scope, rhs)?;
-    let lhs_ref = gen.ref_of(lhs_value);
+    
+    let (lhs_ref, item_type) = match derive_data_type(scope, &lhs)?
+    {
+        DataType::Array(item_type, _) =>
+            (gen.ref_of(lhs_value), item_type),
+
+        DataType::Ref(item_type) =>
+            (lhs_value, item_type),
+
+        _ => panic!(),
+    };
+
+    let item_size = size_of(scope, &item_type)?;
     let address =
         if item_size == 1
         {
@@ -267,6 +302,15 @@ fn compile_deref(gen: &mut IRGenorator, scope: &mut Scope,
     Ok(gen.deref(value, size))
 }
 
+fn compile_sizeof(gen: &mut IRGenorator, scope: &mut Scope,
+                 lhs: &Expression)
+    -> Result<Rc<IRValue>, Box<dyn Error>>
+{
+    let data_type = derive_data_type(scope, lhs)?;
+    let size = size_of(scope, &data_type)?;
+    Ok(gen.emit_int(size as i32))
+}
+
 fn compile_assign(gen: &mut IRGenorator, scope: &mut Scope,
                   lhs: &Expression, rhs: &Expression)
     -> Result<Rc<IRValue>, Box<dyn Error>>
@@ -295,12 +339,14 @@ fn compile_operation(gen: &mut IRGenorator, scope: &mut Scope,
     {
         OperationType::Add => compile_add(gen, scope, &operation.lhs, &operation.rhs.as_ref().unwrap()),
         OperationType::Subtract => compile_subtract(gen, scope, &operation.lhs, &operation.rhs.as_ref().unwrap()),
+        OperationType::Multiply => compile_multiply(gen, scope, &operation.lhs, &operation.rhs.as_ref().unwrap()),
         OperationType::GreaterThan => compile_greater_than(gen, scope, &operation.lhs, &operation.rhs.as_ref().unwrap()),
         OperationType::LessThan => compile_less_than(gen, scope, &operation.lhs, &operation.rhs.as_ref().unwrap()),
         OperationType::Access => compile_access(gen, scope, &operation.lhs, &operation.rhs.as_ref().unwrap()),
         OperationType::Indexed => compile_indexed(gen, scope, &operation.lhs, &operation.rhs.as_ref().unwrap()),
         OperationType::Ref => compile_ref(gen, scope, &operation.lhs),
         OperationType::Deref => compile_deref(gen, scope, &operation.lhs),
+        OperationType::Sizeof => compile_sizeof(gen, scope, &operation.lhs),
         OperationType::Assign => compile_assign(gen, scope, &operation.lhs, &operation.rhs.as_ref().unwrap()),
     }
 }
@@ -336,6 +382,43 @@ fn compile_call(gen: &mut IRGenorator, scope: &mut Scope, call: &Call)
     gen.call(&signature, argument_count, compile_argument, return_size)
 }
 
+fn compile_extern_call(gen: &mut IRGenorator, scope: &mut Scope, call: &Call)
+    -> Result<Rc<IRValue>, Box<dyn Error>>
+{
+    let function_name_token =
+        match call.callable.as_ref()
+        {
+            Expression::Identifier(function_name_token) => function_name_token,
+            _ => panic!(),
+        };
+
+    let function_name = function_name_token.content();
+    let extern_or_none = scope.lookup_extern(function_name);
+    if extern_or_none.is_none()
+    {
+        return Err(CompilerError::new(function_name_token, format!(
+            "Could not find external function '{}'", function_name)));
+    }
+
+    let return_size = match &call.type_variable
+    {
+        Some(return_type) => size_of(scope, return_type)?,
+        None => 0,
+    };
+
+    let argument_count = call.arguments.len();
+    let compile_argument = |gen: &mut IRGenorator, index: usize| -> Result<_, Box<dyn Error>>
+    {
+        let argument_expression = &call.arguments[index];
+        let data_type = derive_data_type(scope, argument_expression)?;
+        let value = compile_expression(gen, scope, argument_expression)?;
+        let size = size_of(scope, &data_type)?;
+        Ok((value, size))
+    };
+
+    gen.call(function_name, argument_count, compile_argument, return_size)
+}
+
 pub fn compile_expression(gen: &mut IRGenorator, scope: &mut Scope,
                           expression: &Expression)
     -> Result<Rc<IRValue>, Box<dyn Error>>
@@ -351,6 +434,7 @@ pub fn compile_expression(gen: &mut IRGenorator, scope: &mut Scope,
         Expression::ArrayLiteral(array) => compile_array_literal(gen, scope, array),
         Expression::Operation(operation) => compile_operation(gen, scope, operation),
         Expression::Call(call) => compile_call(gen, scope, call),
+        Expression::ExternCall(call) => compile_extern_call(gen, scope, call),
     }
 }
 

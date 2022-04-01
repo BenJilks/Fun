@@ -105,10 +105,29 @@ impl<W> X86Output<W>
         else
         {
             let to_str = self.value_of(size, to);
-            self.emit(format!("mov {}, [{}]", to_str, value_str))?;
+            let scratch_register = self.allocator.allocate_scratch_register(4);
+            self.emit(format!("mov {}, {}", scratch_register, value_str))?;
+            self.emit(format!("mov {}, [{}]", to_str, scratch_register))?;
+            self.allocator.free_scratch_register(scratch_register);
         }
 
         Ok(())
+    }
+
+    fn register_for(&self, storage: &IRStorage) -> Option<X86Register>
+    {
+        match storage
+        {
+            IRStorage::Register(register) =>
+            {
+                if self.allocator.allocation_type(*register) == AllocationType::Register {
+                    Some(self.allocator.register_for(*register))
+                } else {
+                    None
+                }
+            },
+            _ => None,
+        }
     }
 
     fn value_of(&mut self, size: usize, storage: &IRStorage) -> String
@@ -149,6 +168,42 @@ impl<W> X86Output<W>
         }
     }
 
+    fn generate_move_to_register_offset(&mut self,
+                                        offset: usize,
+                                        to: X86Register,
+                                        from: &IRStorage,
+                                        size: usize)
+        -> Result<(), Box<dyn Error>>
+    {
+        let to_sized_register = match to.size()
+        {
+            2 =>
+            {
+                match offset
+                {
+                    0 => to.of_size(1, false),
+                    1 => to.of_size(1, true),
+                    _ => panic!(),
+                }
+            },
+
+            4 =>
+            {
+                match offset
+                {
+                    0 => to,
+                    _ => panic!(),
+                }
+            },
+
+            _ => panic!(),
+        };
+
+        let from_value = self.value_of(size, from);
+        self.emit(format!("mov {}, {}", to_sized_register, from_value))?;
+        Ok(())
+    }
+
     fn generate_move_to_offset(&mut self,
                                offset: usize,
                                to: &IRStorage,
@@ -156,6 +211,16 @@ impl<W> X86Output<W>
                                size: usize)
         -> Result<(), Box<dyn Error>>
     {
+        match self.register_for(to)
+        {
+            Some(to_register) => 
+            {
+                return self.generate_move_to_register_offset(
+                    offset, to_register, from, size);
+            },
+            None => {},
+        }
+
         let (to_register, to_offset) = self.offset_of(to);
         if size > 4
         {
@@ -191,7 +256,7 @@ impl<W> X86Output<W>
         for i in (0..size as i32).step_by(4)
         {
             let chunk_size = std::cmp::min(size - i as usize, 4);
-            let temp = scratch_register.of_size(chunk_size);
+            let temp = scratch_register.of_size(chunk_size, false);
             self.emit(format!("mov {}, {}",
                 temp, from_register.offset(chunk_size, from_offset + i)))?;
             self.emit(format!("mov {}, {}",
@@ -236,7 +301,7 @@ impl<W> X86Output<W>
                 let x86_register = self.allocator.register_for(*register);
                 match x86_register
                 {
-                    X86Register::General(letter, _) => letter == 'a',
+                    X86Register::General(letter, _, _) => letter == 'a',
                     _ => false,
                 }
             },
@@ -252,7 +317,7 @@ impl<W> X86Output<W>
         {
             let value_str = self.value_of(size, value);
             self.emit(format!("mov {}, {}",
-                X86Register::General('a', size),
+                X86Register::General('a', size, false),
                 value_str))?;
         }
 
@@ -400,7 +465,7 @@ impl<W> X86Output<W>
 
         for ir in &function.code
         {
-            self.emit(format!("; {}", ir))?;
+            // self.emit(format!("; {}", ir))?;
             match ir
             {
                 IR::AllocateRegister(register, size) => 

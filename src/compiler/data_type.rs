@@ -70,6 +70,9 @@ fn derive_access_type(name_table: &mut Scope,
             }
         },
 
+        DataType::Ref(ref_type) =>
+            derive_access_type(name_table, *ref_type, field_name_token),
+
         _ => panic!(),
     }
 }
@@ -98,6 +101,7 @@ fn derive_operation_type(name_table: &mut Scope,
             match lhs_type
             {
                 DataType::Array(data_type, _) => Ok(*data_type),
+                DataType::Ref(data_type) => Ok(*data_type),
                 _ => panic!(),
             }
         },
@@ -114,10 +118,12 @@ fn derive_operation_type(name_table: &mut Scope,
         // TODO: This should actually derive type.
         OperationType::Add => Ok(DataType::Int),
         OperationType::Subtract => Ok(DataType::Int),
+        OperationType::Multiply => Ok(DataType::Int),
         OperationType::GreaterThan => Ok(DataType::Bool),
         OperationType::LessThan => Ok(DataType::Bool),
 
         OperationType::Ref => Ok(DataType::Ref(Box::from(lhs_type))),
+        OperationType::Sizeof => Ok(DataType::Int),
         OperationType::Assign => Ok(DataType::Null),
     }
 }
@@ -125,22 +131,44 @@ fn derive_operation_type(name_table: &mut Scope,
 pub fn call_signature(scope: &mut Scope,
                       function_name: &str,
                       call: &Call,
-                      type_variable: Option<(&String, &DataType)>)
+                      type_variable: Option<(&DataType, &DataType)>,
+                      return_type: &Option<DataType>)
     -> Result<String, Box<dyn Error>>
 {
     let mut local_scope = Scope::new(Some(scope));
-    if let Some((name, value)) = type_variable {
-        local_scope.put_type_alias(name.clone(), value.clone());
+    if let Some((name, value)) = type_variable 
+    {
+        if name != value
+        {
+            assert!(!doas_type_exist(&local_scope, name));
+            local_scope.put_type_alias(
+                type_variable_name(name).to_owned(),
+                value.clone());
+        }
     }
 
-    let mut signature = function_name.to_owned();
+    let mut signature = function_name.to_owned() + "_";
     for argument in &call.arguments
     {
         let data_type = derive_data_type(&mut local_scope, argument)?;
         signature += &data_type_signature(&data_type);
     }
 
-    Ok(signature)
+    match return_type
+    {
+        Some(return_type) =>
+        {
+            signature += &data_type_signature(
+                &resolve_type_aliases(&mut local_scope, return_type.clone()))
+        },
+        None => {}
+    }
+
+    if signature == "main_" {
+        Ok("main".to_owned())
+    } else {
+        Ok(signature)
+    }
 }
 
 fn derive_call_type(scope: &mut Scope, call: &Call)
@@ -205,6 +233,9 @@ pub fn derive_data_type(scope: &mut Scope,
 
         Expression::Call(call) =>
             derive_call_type(scope, call),
+
+        Expression::ExternCall(call) =>
+            Ok(call.type_variable.clone().unwrap()),
 
         Expression::Identifier(name) =>
         {
@@ -339,14 +370,54 @@ fn data_type_signature(data_type: &DataType)
     }
 }
 
-pub fn function_signature(function: &Function, params: &Vec<DataType>)
+pub fn function_signature(function: &Function,
+                          params: &Vec<DataType>,
+                          return_type: &Option<DataType>)
     -> String
 {
-    let mut signature = function.name.content().to_owned();
+    let mut signature = function.name.content().to_owned() + "_";
     for param in params {
         signature += &data_type_signature(param);
     }
 
-    signature
+    match return_type
+    {
+        Some(return_type) =>
+            signature += &data_type_signature(return_type),
+        None => {},
+    }
+
+    if signature == "main_" {
+        "main".to_owned()
+    } else {
+        signature
+    }
+}
+
+pub fn doas_type_exist(scope: &Scope, data_type: &DataType) -> bool
+{
+    match data_type
+    {
+        DataType::Struct(name) => scope.lookup_struct(name).is_some(),
+        DataType::Array(array_type, _) => doas_type_exist(scope, array_type),
+        DataType::Ref(ref_type) => doas_type_exist(scope, ref_type),
+
+        DataType::Generic(generic_type, name) =>
+        {
+            doas_type_exist(scope, generic_type) && 
+                scope.lookup_typed_struct(name).is_some()
+        },
+
+        _ => true,
+    }
+}
+
+pub fn type_variable_name(type_variable: &DataType) -> &str
+{
+    match type_variable
+    {
+        DataType::Struct(name) => name,
+        _ => panic!(),
+    }
 }
 

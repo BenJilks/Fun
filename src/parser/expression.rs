@@ -12,9 +12,10 @@ const TERM_OPERATIONS: [(TokenType, OperationType); 2] =
     (TokenType::OpenSquare, OperationType::Indexed),
 ];
 
-const ARITHMATIC_OPERATIONS: [(TokenType, OperationType); 2] =
+const ARITHMATIC_OPERATIONS: [(TokenType, OperationType); 3] =
 [
     (TokenType::Plus, OperationType::Add),
+    (TokenType::Star, OperationType::Multiply),
     (TokenType::Minus, OperationType::Subtract),
 ];
 
@@ -109,6 +110,18 @@ fn parse_array(tokens: &mut Peekable<impl Iterator<Item = Token>>)
     Ok(Expression::ArrayLiteral(array))
 }
 
+fn parse_extern_call(tokens: &mut Peekable<impl Iterator<Item = Token>>)
+    -> Result<Expression, Box<dyn Error>>
+{
+    tokens.expect(TokenType::Extern)?;
+    match parse_expression(tokens)?
+    {
+        Some(Expression::Call(call)) =>
+            Ok(Expression::ExternCall(call)),
+        _ => panic!(),
+    }
+}
+
 pub fn parse_value(tokens: &mut Peekable<impl Iterator<Item = Token>>)
     -> Result<Option<Expression>, Box<dyn Error>>
 {
@@ -137,11 +150,17 @@ pub fn parse_value(tokens: &mut Peekable<impl Iterator<Item = Token>>)
         TokenType::New =>
             Some(parse_initializer_list(tokens)?),
 
+        TokenType::Extern =>
+            Some(parse_extern_call(tokens)?),
+
         TokenType::OpenSquare =>
             Some(parse_array(tokens)?),
 
         TokenType::Ref =>
             parse_unary(tokens, OperationType::Ref)?,
+
+        TokenType::Sizeof =>
+            parse_unary(tokens, OperationType::Sizeof)?,
 
         TokenType::Deref =>
             parse_unary(tokens, OperationType::Deref)?,
@@ -173,10 +192,22 @@ fn parse_call(tokens: &mut Peekable<impl Iterator<Item = Token>>,
     }
 
     tokens.expect(TokenType::CloseBracket)?;
+    let type_variable = 
+        if tokens.is_next(TokenType::Of)
+        {
+            tokens.next();
+            Some(parse_data_type(tokens)?)
+        }
+        else 
+        {
+            None
+        };
+
     return Ok(Expression::Call(Call
     {
         callable: Box::from(value),
         arguments,
+        type_variable,
     }))
 }
 

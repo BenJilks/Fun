@@ -7,7 +7,7 @@ use std::rc::Rc;
 pub struct FunctionDescriptionType
 {
     pub params: Vec<DataTypeDescription>,
-    pub type_variable: Option<String>,
+    pub type_variable: Option<DataType>,
     pub return_type: Option<DataType>,
 }
 

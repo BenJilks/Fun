@@ -1,92 +1,30 @@
+use std::list
+use std::hash_set
 
-extern printf
-extern scanf
-
-struct Vec of T
+fun print(i: int)
 {
-    x: T,
-    y: T,
+    extern printf("%d", i)
 }
 
-fun vec(x: T, y: T) -> T Vec
-    of T
+fun print(b: bool)
 {
-    return new T Vec
-    {
-        x = x,
-        y = y,
-    }
+    if b -> extern printf("true")
+    else -> extern printf("false")
 }
 
-struct List of T
+fun is_nice(x: Sized) -> bool
 {
-    items: ref T,
-    capacity: int,
-    size: int,
-}
-
-struct Optional of T
-{
-    value: T,
-    has_value: bool,
-}
-
-fun some(value: T) -> T Optional
-    of T
-{
-    return new T Optional
-    {
-        value = value,
-        has_value = true,
-    }
-}
-
-fun none(default: T) -> T Optional
-    of T
-{
-    return new T Optional
-    {
-        value = default,
-        has_value = false,
-    }
-}
-
-fun has_value(optional: T Optional) -> bool
-    of T
-{
-    return optional.has_value
-}
-
-fun list(first: T) -> T List
-    of T
-{
-    return new T List
-    {
-        items = ref first,
-        capacity = 1,
-        size = 1,
-    }
-}
-
-fun nth(self: T List, index: int) -> T Optional
-    of T
-{
-    if index < 0 -> {
-        return none(0)
-    }
-    if index > self.size -> {
-        return none(0)
-    }
-
-    return some(deref self.items)
+    return len(x) == 69
 }
 
 fun main()
 {
-    let test = list(2)
-    let x = nth(test, 2)
+    let x = list() of int
+    for i in 1..10 ->
+        append(ref x, i)
 
-    if has_value(x) -> printf("yes")
-    else            -> printf("no")
+    print(len(ref x))
+    print(is_nice(ref x))
+    drop(x)
 }
 

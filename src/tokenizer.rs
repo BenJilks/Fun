@@ -23,6 +23,7 @@ pub enum TokenType
     Deref,
     Of,
     New,
+    Sizeof,
 
     Int,
     Char,
@@ -40,6 +41,7 @@ pub enum TokenType
     Arrow,
 
     Plus,
+    Star,
     Minus,
     GreaterThan,
     LessThan,
@@ -76,6 +78,7 @@ impl fmt::Display for TokenType
             Self::Deref => write!(f, "deref"),
             Self::Of => write!(f, "of"),
             Self::New => write!(f, "new"),
+            Self::Sizeof => write!(f, "sizeof"),
 
             Self::Int => write!(f, "int"),
             Self::Char => write!(f, "char"),
@@ -93,6 +96,7 @@ impl fmt::Display for TokenType
             Self::Arrow => write!(f, "->"),
 
             Self::Plus => write!(f, "+"),
+            Self::Star => write!(f, "*"),
             Self::Minus => write!(f, "-"),
             Self::GreaterThan => write!(f, ">"),
             Self::LessThan => write!(f, "<"),
@@ -268,6 +272,7 @@ fn handle_initial(byte: u8,
         ':' => emit(TokenType::Colon, ":"),
         ',' => emit(TokenType::Comma, ","),
         '+' => emit(TokenType::Plus, "+"),
+        '*' => emit(TokenType::Star, "*"),
         '>' => emit(TokenType::GreaterThan, ">"),
         '<' => emit(TokenType::LessThan, "<"),
         '.' => emit(TokenType::Dot, "."),
@@ -325,6 +330,8 @@ fn parse_identifier(text: &str) -> TokenType
         TokenType::Of
     } else if text == "new" {
         TokenType::New
+    } else if text == "sizeof" {
+        TokenType::Sizeof
     } else if text == "true" {
         TokenType::BoolLiteral
     } else if text == "false" {

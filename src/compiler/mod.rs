@@ -7,7 +7,7 @@ mod expression;
 mod statement;
 use intermediate::IRGenorator;
 use name_table::{Scope, CompiledFunction, FunctionDescriptionType, TypedStructType};
-use data_type::size_of;
+use data_type::{size_of, doas_type_exist, type_variable_name};
 use function::compile_function;
 use crate::ast::SourceFile;
 use crate::ast::{Function, Struct};
@@ -27,11 +27,13 @@ fn register_typed_struct(scope: &mut Scope,
         fields.push((name.to_owned(), data_type));
     }
 
-    let variable_token = struct_.type_variable.clone().unwrap();
+    let type_variable = struct_.type_variable.clone().unwrap();
     let name = struct_.name.content();
+    assert!(!doas_type_exist(scope, &type_variable));
+
     scope.put_typed_struct(name.to_owned(), TypedStructType
     {
-        variable: variable_token.content().to_owned(),
+        variable: type_variable_name(&type_variable).to_owned(),
         fields,
     });
     Ok(())
@@ -74,7 +76,7 @@ fn register_function(scope: &mut Scope,
         .collect::<Vec<_>>();
 
     let name = function.name.content();
-    let type_variable = function.type_variable.as_ref().map(|x| x.content().to_owned());
+    let type_variable = function.type_variable.clone();
     scope.put_function_description(name.to_owned(), FunctionDescriptionType
     {
         params,
@@ -127,7 +129,11 @@ pub fn compile(ast: SourceFile)
     while functions_to_compile.len() > 0
     {
         let function_data = functions_to_compile.pop().unwrap();
-        let function = ast.find_function(&function_data.name, &function_data.description.params);
+        let function = ast.find_function(
+            &function_data.name,
+            &function_data.description.params,
+            &function_data.description.type_variable);
+
         let functions_used = compile_function(
             &mut gen,
             &mut scope,
